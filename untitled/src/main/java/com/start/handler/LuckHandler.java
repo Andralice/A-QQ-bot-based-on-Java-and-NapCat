@@ -9,7 +9,7 @@ import com.start.util.RateLimiter;
 
 public class LuckHandler implements MessageHandler {
     // 30秒内同一用户不能重复触发
-    private static final RateLimiter rateLimiter = new RateLimiter(30);
+    private static final RateLimiter rateLimiter = new RateLimiter(5);
 
     @Override
     public boolean match(JsonNode msg) {

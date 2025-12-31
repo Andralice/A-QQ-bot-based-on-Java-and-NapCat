@@ -9,6 +9,10 @@ import java.time.Instant;
  */
 public class RateLimiter {
     private final long windowSeconds;
+    /**
+     * 存储每个触发器的最后触发时间戳
+     * 键为触发器标识符，值为最后一次触发的时间戳（毫秒）
+     */
     private final Map<String, Long> lastTriggerTime = new ConcurrentHashMap<>();
 
     public RateLimiter(long windowSeconds) {

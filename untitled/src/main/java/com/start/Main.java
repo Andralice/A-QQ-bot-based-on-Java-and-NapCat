@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.config.BotConfig;
 import com.start.handler.HandlerRegistry;
 import com.start.handler.MessageHandler;
+import com.start.service.SpamDetector;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,6 +26,11 @@ public class Main extends WebSocketClient {
     private static String wsUrl;
     private static final Set<Long> ALLOWED_GROUPS = BotConfig.getAllowedGroups();
     private static final Set<Long> ALLOWED_PRIVATE_USERS = BotConfig.getAllowedPrivateUsers();
+    private static SpamDetector spamDetector;
+    public void init() {
+        this.spamDetector = new SpamDetector(this);
+        logger.info("🛡️ SpamDetector 初始化完成");
+    }
     static {
         try (InputStream is = Main.class.getClassLoader().getResourceAsStream("application.properties")) {
             if (is == null) {
@@ -57,45 +63,60 @@ public class Main extends WebSocketClient {
         logger.debug("📡 原始事件: {}", message);
         try {
             JsonNode event = MAPPER.readTree(message);
-            if ("message".equals(event.path("post_type").asText())) {
 
-                String messageType = event.path("message_type").asText();
-                long userId = event.path("user_id").asLong();
+            // 只处理 message 类型
+            if (!"message".equals(event.path("post_type").asText())) {
+                return;
+            }
 
-                boolean isAllowed = false;
+            String messageType = event.path("message_type").asText();
+            long userId = event.path("user_id").asLong();
+            boolean isAllowed = false;
 
-                if ("group".equals(messageType)) {
-                    long groupId = event.path("group_id").asLong();
-                    if (BotConfig.getAllowedGroups().contains(groupId)) {
-                        isAllowed = true;
-                    } else {
-                        logger.debug("🚫 忽略非白名单群消息 | group_id={}", groupId);
-                    }
-                } else if ("private".equals(messageType)) {
-                    // 👇 核心逻辑：判断是否启用私聊白名单
-                    if (!BotConfig.isPrivateWhitelistEnabled()) {
-                        isAllowed = true; // 开关关闭 → 允许所有私聊
-                        logger.debug("💬 接受私聊（白名单未启用）| user_id={}", userId);
-                    } else {
-                        if (BotConfig.getAllowedPrivateUsers().contains(userId)) {
-                            isAllowed = true; // 开关开启 → 仅白名单
-                            logger.debug("💬 接受白名单私聊 | user_id={}", userId);
-                        } else {
-                            logger.debug("🚫 忽略非白名单私聊 | user_id={}", userId);
-                        }
-                    }
+            if ("group".equals(messageType)) {
+                long groupId = event.path("group_id").asLong();
+                if (BotConfig.getAllowedGroups().contains(groupId)) {
+                    isAllowed = true;
+                } else {
+                    logger.debug("🚫 忽略非白名单群消息 | group_id={}", groupId);
                 }
-                // 注意：不处理 "discuss" 等其他类型
-
-                if (isAllowed) {
-                    HandlerRegistry.dispatch(event, this);
+            } else if ("private".equals(messageType)) {
+                if (!BotConfig.isPrivateWhitelistEnabled()) {
+                    isAllowed = true; // 白名单关闭 → 全部私聊放行
+                    logger.debug("💬 接受私聊（白名单未启用）| user_id={}", userId);
+                } else {
+                    if (BotConfig.getAllowedPrivateUsers().contains(userId)) {
+                        isAllowed = true;
+                        logger.debug("💬 接受白名单私聊 | user_id={}", userId);
+                    } else {
+                        logger.debug("🚫 忽略非白名单私聊 | user_id={}", userId);
+                    }
                 }
             }
+
+            // 🔑 核心：只有 isAllowed 的消息才继续处理
+            if (isAllowed) {
+                String rawMessage = event.path("raw_message").asText(); // ✅ 用 raw_message 更准确
+
+                // 👇 防刷检测（仅对允许的群聊）
+                if ("group".equals(messageType)) {
+                    long groupId = event.path("group_id").asLong();
+                    // 安全调用：防止 spamDetector 未初始化
+                    if (this.spamDetector != null) {
+                        this.spamDetector.checkAndInterrupt(String.valueOf(groupId), userId, rawMessage);
+                    } else {
+                        logger.warn("⚠️ SpamDetector 未初始化，跳过防刷检测");
+                    }
+                }
+
+                // 分发命令
+                HandlerRegistry.dispatch(event, this);
+            }
+
         } catch (Exception e) {
             logger.error("❌ 处理消息失败", e);
         }
     }
-
     @Override
     public void onClose(int code, String reason, boolean remote) {
         logger.warn("❌ 连接断开 (code={}, remote={}), 5秒后重连...", code, remote);
@@ -145,10 +166,40 @@ public class Main extends WebSocketClient {
             logger.error("❌ 发送回复失败", e);
         }
     }
+    // 发送私聊消息
+    public void sendPrivateReply(long userId, String reply) {
+        try {
+            ObjectNode action = MAPPER.createObjectNode();
+            action.put("action", "send_private_msg");
+            ObjectNode params = action.putObject("params");
+            params.put("user_id", userId);
+            params.put("message", reply);
+            this.send(action.toString());
+            logger.debug("📤 已发送私聊回复: {}", reply);
+        } catch (Exception e) {
+            logger.error("❌ 发送私聊回复失败", e);
+        }
+    }
+
+    // 发送群聊消息
+    public void sendGroupReply(long groupId, String reply) {
+        try {
+            ObjectNode action = MAPPER.createObjectNode();
+            action.put("action", "send_group_msg");
+            ObjectNode params = action.putObject("params");
+            params.put("group_id", groupId);
+            params.put("message", reply);
+            this.send(action.toString());
+            logger.debug("📤 已发送群聊回复: {}", reply);
+        } catch (Exception e) {
+            logger.error("❌ 发送群聊回复失败", e);
+        }
+    }
 
     public static void main(String[] args) throws Exception {
         Main bot = new Main(new URI(wsUrl));
         bot.connect();
+        bot.init();
         while (!bot.isClosed()) {
             Thread.sleep(1000);
         }

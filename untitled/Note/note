@@ -1,0 +1,2 @@
+mvn clean package -DskipTests
+打包上传

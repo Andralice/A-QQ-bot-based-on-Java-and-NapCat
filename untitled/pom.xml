@@ -44,6 +44,12 @@
             <artifactId>Java-WebSocket</artifactId>
             <version>1.5.3</version>
         </dependency>
+        <!-- 1. Apache HttpClient 5 (用于发送 HTTP 请求) -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+            <version>5.2.1</version>
+        </dependency>
         <!-- JSON 解析 -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

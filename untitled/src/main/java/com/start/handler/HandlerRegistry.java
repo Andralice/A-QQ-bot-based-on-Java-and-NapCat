@@ -26,8 +26,8 @@ public class HandlerRegistry {
             if (handler.match(message)) {
                 handler.handle(message, bot);
                 return; // 找到第一个匹配就执行并退出
-//            }else {
-//                log.debug("未找到匹配的handle");
+            }else {
+                log.debug("未找到匹配的handle");
             }
         }
         // 可选：默认回复

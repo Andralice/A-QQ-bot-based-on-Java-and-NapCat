@@ -2,6 +2,7 @@ package com.start.handler;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.start.Main;
+import com.start.config.BotConfig;
 import com.start.service.BaiLianService;
 import com.start.util.MessageUtil;
 public class AIHandler implements MessageHandler {
@@ -9,14 +10,31 @@ public class AIHandler implements MessageHandler {
 
     @Override
     public boolean match(JsonNode msg) {
-        String raw = msg.path("raw_message").asText().trim();
-        // 支持 !ai 和 ！ai
-        if (raw.startsWith("!ai ") || raw.startsWith("！ai ")) {
-            return true;
+        String messageType = msg.path("message_type").asText();
+        long botQq = BotConfig.getBotQq();
+
+        if ("private".equals(messageType)) {
+            // 私聊：只要不是纯命令（如菜单、help），就交给 AI
+            String raw = msg.path("raw_message").asText().trim();
+            if (raw.isEmpty()) return false;
+
+            // 可选：排除某些系统命令（比如你有 !menu）
+            if (raw.startsWith("!") && !raw.startsWith("!ai ") && !raw.startsWith("！ai ")) {
+                return false; // 不是 !ai 就不处理
+            }
+
+            return true; // 其他所有私聊消息都走 AI
+        } else if ("group".equals(messageType)) {
+            // 群聊：必须显式触发
+            String raw = msg.path("raw_message").asText().trim();
+            if (raw.startsWith("!ai ") || raw.startsWith("！ai ")) {
+                return true;
+            }
+            // 使用你已有的工具类判断是否 @ 了机器人
+            return MessageUtil.isAt(msg.path("message"), botQq);
         }
-        // 使用你的工具类判断是否 @ 了机器人
-        long selfId = msg.path("self_id").asLong();
-        return MessageUtil.isAt(msg.path("message"), selfId);
+
+        return false;
     }
 
     @Override

@@ -15,14 +15,25 @@ public class LuckHandler implements MessageHandler {
     public boolean match(JsonNode msg) {
         long botQq = BotConfig.getBotQq();
         String botName = BotConfig.getBotName();
-        String plainText = MessageUtil.extractPlainText(msg.path("message")).trim();
+        String plainText = MessageUtil.extractPlainText(msg.path("message"));
+
+        if (plainText == null) {
+            plainText = "";
+        }
+        plainText = plainText.trim();
 
         boolean isAtMe = MessageUtil.isAt(msg.path("message"), botQq);
-        boolean mentionsBot = plainText.contains(botName); // 只要提到名字
-        boolean hasKeyword = plainText.contains("幸运值") || plainText.contains("运势");
+        boolean mentionsBot = botName != null && plainText.contains(botName);
+        boolean containsKeyword = plainText.contains("幸运值") || plainText.contains("运势");
+        boolean isExactKeyword = "幸运值".equals(plainText) || "运势".equals(plainText);
 
-        // 触发条件：被 @ 了，或者提到了名字；并且有关键词
-        return (isAtMe || mentionsBot) && hasKeyword;
+        // 原逻辑：被@或提名字 + 含关键词
+        boolean originalCondition = (isAtMe || mentionsBot) && containsKeyword;
+
+        // 新增逻辑：只要整条消息就是关键词，就触发（无需@或提名字）
+        boolean exactKeywordOnly = isExactKeyword;
+
+        return originalCondition || exactKeywordOnly;
     }
 
     @Override

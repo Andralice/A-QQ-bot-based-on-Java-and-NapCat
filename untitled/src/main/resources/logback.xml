@@ -2,7 +2,8 @@
 <configuration>
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <!-- 添加颜色：时间绿色，级别高亮（INFO=绿, WARN=黄, ERROR=红） -->
+            <pattern>%INFO(%d{HH:mm:ss}) [%thread] %highlight(%-5level) %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
 

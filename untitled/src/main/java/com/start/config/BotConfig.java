@@ -19,6 +19,8 @@ public class BotConfig {
     private static Set<Long> ALLOWED_GROUPS ;
     private static Set<Long> ALLOWED_PRIVATE_USERS ;
     private static boolean privateWhitelistEnabled = false;
+    private static String oneBotHttpBaseUrl;
+    private static String oneBotAccessToken;
     static {
         try (InputStream is = BotConfig.class.getClassLoader().getResourceAsStream("application.properties")) {
             if (is == null) {
@@ -35,7 +37,8 @@ public class BotConfig {
                 throw new RuntimeException("❌ 请配置 bot.qq");
             }
             botQq = Long.parseLong(qqStr.trim());
-
+            oneBotHttpBaseUrl = props.getProperty("onebot.http-base-url", "http://127.0.0.1:5700").trim();
+            oneBotAccessToken = props.getProperty("onebot.access-token", "").trim();
 //            botName = props.getProperty("bot.name", "机器人").trim();
             botName = "糖果熊";
             String enabledStr = props.getProperty("private.whitelist.enabled", "false").trim();
@@ -84,4 +87,6 @@ public class BotConfig {
     public static String getAt(long userId) {
         return "[CQ:at,qq=" + userId + "]";
     }
+    public static String getOneBotHttpBaseUrl() { return oneBotHttpBaseUrl; }
+    public static String getOneBotAccessToken() { return oneBotAccessToken; }
 }

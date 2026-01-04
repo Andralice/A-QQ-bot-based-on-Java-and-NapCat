@@ -1,22 +1,30 @@
 package com.start;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.config.BotConfig;
+
+import com.start.handler.HandlerRegistry;
+import com.start.service.OneBotWsService;
 import com.start.service.SpamDetector;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.start.handler.HandlerRegistry;
+
 import java.io.InputStream;
 import java.net.URI;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+
 public class Main extends WebSocketClient {
 
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
@@ -24,11 +32,15 @@ public class Main extends WebSocketClient {
     private static String wsUrl;
     private static final Set<Long> ALLOWED_GROUPS = BotConfig.getAllowedGroups();
     private static final Set<Long> ALLOWED_PRIVATE_USERS = BotConfig.getAllowedPrivateUsers();
-    private static SpamDetector spamDetector;
-    public void init() {
-        this.spamDetector = new SpamDetector(this);
-        logger.info("🛡️ SpamDetector 初始化完成");
-    }
+
+    // ===== 新增：用于处理 WebSocket API 响应 =====
+    private final Map<String, CompletableFuture<JsonNode>> pendingRequests = new ConcurrentHashMap<>();
+
+    // ===== 服务实例 =====
+    private SpamDetector spamDetector;
+
+    private final OneBotWsService oneBotWsService; // 新增
+
     static {
         try (InputStream is = Main.class.getClassLoader().getResourceAsStream("application.properties")) {
             if (is == null) {
@@ -49,6 +61,13 @@ public class Main extends WebSocketClient {
 
     public Main(URI serverUri) {
         super(serverUri);
+
+        this.oneBotWsService = new OneBotWsService(this); // 初始化 WebSocket API 服务
+    }
+
+    public void init() {
+        this.spamDetector = new SpamDetector(this);
+        logger.info("🛡️ SpamDetector 初始化完成");
     }
 
     @Override
@@ -62,7 +81,17 @@ public class Main extends WebSocketClient {
         try {
             JsonNode event = MAPPER.readTree(message);
 
-            // 只处理 message 类型
+            // ✅ 优先处理 API 响应（带 echo 字段）
+            if (event.has("echo")) {
+                String echo = event.get("echo").asText();
+                CompletableFuture<JsonNode> future = pendingRequests.remove(echo);
+                if (future != null) {
+                    future.complete(event);
+                    return; // 不走后续消息处理流程
+                }
+            }
+
+            // 只处理 message 类型事件
             if (!"message".equals(event.path("post_type").asText())) {
                 return;
             }
@@ -73,17 +102,17 @@ public class Main extends WebSocketClient {
 
             if ("group".equals(messageType)) {
                 long groupId = event.path("group_id").asLong();
-                if (BotConfig.getAllowedGroups().contains(groupId)) {
+                if (ALLOWED_GROUPS.contains(groupId)) {
                     isAllowed = true;
                 } else {
                     logger.debug("🚫 忽略非白名单群消息 | group_id={}", groupId);
                 }
             } else if ("private".equals(messageType)) {
                 if (!BotConfig.isPrivateWhitelistEnabled()) {
-                    isAllowed = true; // 白名单关闭 → 全部私聊放行
+                    isAllowed = true;
                     logger.debug("💬 接受私聊（白名单未启用）| user_id={}", userId);
                 } else {
-                    if (BotConfig.getAllowedPrivateUsers().contains(userId)) {
+                    if (ALLOWED_PRIVATE_USERS.contains(userId)) {
                         isAllowed = true;
                         logger.debug("💬 接受白名单私聊 | user_id={}", userId);
                     } else {
@@ -92,14 +121,11 @@ public class Main extends WebSocketClient {
                 }
             }
 
-            // 🔑 核心：只有 isAllowed 的消息才继续处理
             if (isAllowed) {
-                String rawMessage = event.path("raw_message").asText(); // ✅ 用 raw_message 更准确
+                String rawMessage = event.path("raw_message").asText();
 
-                // 👇 防刷检测（仅对允许的群聊）
                 if ("group".equals(messageType)) {
                     long groupId = event.path("group_id").asLong();
-                    // 安全调用：防止 spamDetector 未初始化
                     if (this.spamDetector != null) {
                         this.spamDetector.checkAndInterrupt(String.valueOf(groupId), userId, rawMessage);
                     } else {
@@ -107,7 +133,6 @@ public class Main extends WebSocketClient {
                     }
                 }
 
-                // 分发命令
                 HandlerRegistry.dispatch(event, this);
             }
 
@@ -115,6 +140,7 @@ public class Main extends WebSocketClient {
             logger.error("❌ 处理消息失败", e);
         }
     }
+
     @Override
     public void onClose(int code, String reason, boolean remote) {
         logger.warn("❌ 连接断开 (code={}, remote={}), 5秒后重连...", code, remote);
@@ -127,7 +153,7 @@ public class Main extends WebSocketClient {
             logger.info("🔄 尝试重连...");
             Main newBot = new Main(new URI(wsUrl));
             newBot.connect();
-            // 等待连接关闭（保持主线程不退出）
+            newBot.init();
             while (!newBot.isClosed()) {
                 Thread.sleep(1000);
             }
@@ -143,7 +169,28 @@ public class Main extends WebSocketClient {
         logger.error("🔥 WebSocket 发生错误", ex);
     }
 
-    // 提供一个公共的 send 方法供 MessageHandler 调用
+    // ===== 新增：通过 WebSocket 调用 OneBot API =====
+    public CompletableFuture<JsonNode> callOneBotApi(String action, JsonNode params) {
+        String echo = "req_" + System.currentTimeMillis() + "_" + ThreadLocalRandom.current().nextInt(1000000);
+        CompletableFuture<JsonNode> future = new CompletableFuture<>();
+        pendingRequests.put(echo, future);
+
+        ObjectNode request = MAPPER.createObjectNode();
+        request.put("action", action);
+        request.set("params", params);
+        request.put("echo", echo);
+
+        this.send(request.toString());
+        logger.debug("📤 发送 OneBot API 请求: action={}, echo={}", action, echo);
+
+        return future.orTimeout(10, TimeUnit.SECONDS)
+                .exceptionally(t -> {
+                    logger.warn("⏰ OneBot API 调用失败或超时: action={}, echo={}", action, echo, t);
+                    return null;
+                });
+    }
+
+    // ===== 消息发送方法 =====
     public void sendReply(JsonNode msg, String reply) {
         try {
             ObjectNode action = MAPPER.createObjectNode();
@@ -164,7 +211,7 @@ public class Main extends WebSocketClient {
             logger.error("❌ 发送回复失败", e);
         }
     }
-    // 发送私聊消息
+
     public void sendPrivateReply(long userId, String reply) {
         try {
             ObjectNode action = MAPPER.createObjectNode();
@@ -179,7 +226,6 @@ public class Main extends WebSocketClient {
         }
     }
 
-    // 发送群聊消息
     public void sendGroupReply(long groupId, String reply) {
         try {
             ObjectNode action = MAPPER.createObjectNode();
@@ -194,6 +240,14 @@ public class Main extends WebSocketClient {
         }
     }
 
+    // ===== Getter =====
+
+
+    public OneBotWsService getOneBotWsService() {
+        return oneBotWsService;
+    }
+
+    // ===== Main 入口 =====
     public static void main(String[] args) throws Exception {
         Main bot = new Main(new URI(wsUrl));
         bot.connect();

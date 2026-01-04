@@ -20,6 +20,7 @@ public class HandlerRegistry {
         handlers.add(new AIHandler());
         handlers.add(new SanjiaoHandler());
         handlers.add(new DailyProfessionHandler());
+        handlers.add(new DailyCpHandler());
         // 后续新增功能，只需在这里 add(new XxxHandler())
     }
 

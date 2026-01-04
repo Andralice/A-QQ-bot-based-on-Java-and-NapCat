@@ -81,4 +81,7 @@ public class BotConfig {
     public static boolean isPrivateWhitelistEnabled() {
         return privateWhitelistEnabled;
     }
+    public static String getAt(long userId) {
+        return "[CQ:at,qq=" + userId + "]";
+    }
 }

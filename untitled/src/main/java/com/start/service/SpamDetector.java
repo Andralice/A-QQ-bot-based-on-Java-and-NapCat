@@ -17,7 +17,7 @@ public class SpamDetector {
     // 触发条件：相同内容出现 M 次
     private static final int MIN_REPEAT_COUNT = 3;
     // 最小消息长度：避免对过短的消息进行检测
-    private static final int MIN_MESSAGE_LENGTH = 2;
+    private static final int MIN_MESSAGE_LENGTH = 1;
 
     private final Map<String, Deque<MessageRecord>> groupMessages = new ConcurrentHashMap<>();
     private final Map<String, Long> lastTriggerTime = new ConcurrentHashMap<>();

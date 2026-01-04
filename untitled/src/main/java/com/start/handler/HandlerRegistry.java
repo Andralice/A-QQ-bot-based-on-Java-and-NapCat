@@ -18,6 +18,8 @@ public class HandlerRegistry {
         handlers.add(new LuckHandler());
         handlers.add(new JokeHandler());
         handlers.add(new AIHandler());
+        handlers.add(new SanjiaoHandler());
+        handlers.add(new DailyProfessionHandler());
         // 后续新增功能，只需在这里 add(new XxxHandler())
     }
 

@@ -56,15 +56,16 @@ public class LuckHandler implements MessageHandler {
         }
 
         int luck = LuckUtil.getDailyLuck(userId);
+        String Atthis =BotConfig.getAt(userId);
         String reply;
         if (luck >= 90) {
-            reply = "🌟 欧气爆棚！您今天的幸运值是 " + luck + "！";
+            reply =Atthis +"🌟 欧气爆棚！您今天的幸运值是 " + luck + "！";
         } else if (luck >= 70) {
-            reply = "😊 运气不错哦～您今天的幸运值是 " + luck + "！";
+            reply =Atthis + "😊 运气不错哦～您今天的幸运值是 " + luck + "！";
         } else if (luck >= 40) {
-            reply = "🙂 平平无奇的一天，幸运值：" + luck;
+            reply =Atthis +"🙂 平平无奇的一天，幸运值：" + luck;
         } else {
-            reply = "😞 今天小心点...您的幸运值只有 " + luck;
+            reply =Atthis + "😞 今天小心点...您的幸运值只有 " + luck;
         }
 
         bot.sendReply(msg, reply);

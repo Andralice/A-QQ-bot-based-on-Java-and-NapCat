@@ -2,8 +2,6 @@ package com.start;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.config.BotConfig;
-import com.start.handler.HandlerRegistry;
-import com.start.handler.MessageHandler;
 import com.start.service.SpamDetector;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
@@ -11,7 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import com.start.handler.HandlerRegistry;
 import java.io.InputStream;
 import java.net.URI;
 import java.util.Properties;

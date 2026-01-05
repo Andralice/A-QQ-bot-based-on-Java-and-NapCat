@@ -42,6 +42,9 @@ public class Main extends WebSocketClient {
     private final OneBotWsService oneBotWsService; // 新增
 
     static {
+        System.setProperty("dashscope.api-key", "sk-86b180d2f5254cb9b7c37af1f442baaf");
+        System.out.println("DEBUG: dashscope.api-key = " +
+                System.getProperty("dashscope.api-key", "NOT SET"));
         try (InputStream is = Main.class.getClassLoader().getResourceAsStream("application.properties")) {
             if (is == null) {
                 throw new RuntimeException("❌ 未找到 application.properties 文件！");

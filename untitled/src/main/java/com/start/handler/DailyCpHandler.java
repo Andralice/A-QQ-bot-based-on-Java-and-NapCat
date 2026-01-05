@@ -28,12 +28,9 @@ public class DailyCpHandler implements MessageHandler {
             return false;
         }
         String rawMsg = message.path("raw_message").asText().trim();
-        for (String trigger : TRIGGERS) {
-            if (rawMsg.contains(trigger)) {
-                return true;
-            }
-        }
-        return false;
+
+        // 精确匹配：消息必须完全等于某个 trigger（忽略首尾空格）
+        return TRIGGERS.contains(rawMsg);
     }
 
     @Override

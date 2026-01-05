@@ -13,7 +13,16 @@
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
+    <repositories>
 
+        <!-- 可选：阿里云镜像（国内更快） -->
+        <repository>
+            <id>aliyunmaven</id>
+            <url>https://maven.aliyun.com/repository/public</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+    </repositories>
     <dependencies>
         <!-- WebSocket 客户端 -->
         <dependency>
@@ -58,6 +67,11 @@
                     <artifactId>httpcore5</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>dashscope-sdk-java</artifactId>
+            <version>2.22.4</version>
         </dependency>
 
         <!-- WebDriverManager（依赖 httpclient5 >= 5.3.0） -->

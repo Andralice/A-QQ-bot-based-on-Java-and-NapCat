@@ -6,6 +6,8 @@ import com.start.Main;
 import com.start.config.BotConfig;
 import com.start.service.BaiLianService;
 import com.start.util.MessageUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Optional;
@@ -13,6 +15,7 @@ import java.util.Random;
 
 public class AIHandler implements MessageHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(AIHandler.class);
     private final BaiLianService aiService = new BaiLianService();
     private final Random random = new Random();
 
@@ -160,6 +163,7 @@ public class AIHandler implements MessageHandler {
             } else {
                 // 私聊：目前不分句（可选）
                 bot.sendReply(originalMsg, reply);
+
             }
         }).start();
     }

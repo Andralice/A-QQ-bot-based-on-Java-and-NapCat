@@ -94,6 +94,7 @@ public class BaiLianService {
 
     // 调用 AI（同步），返回第一条短回复（或空字符串表示不应回复）
     public String generate(String sessionId, String userId, String userPrompt, String groupId) {
+        logger.info("🧠 AI 调用: sessionId={}, prompt=[{}]", sessionId, userPrompt);
         try {
             aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId);
             // 构建上下文

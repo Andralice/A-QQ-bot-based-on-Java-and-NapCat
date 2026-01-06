@@ -96,9 +96,12 @@ public class Main extends WebSocketClient {
     @Override
     public void onMessage(String message) {
         logger.debug("📡 原始事件: {}", message);
+
         try {
             JsonNode event = MAPPER.readTree(message);
-
+            long userId1 = event.path("user_id").asLong();
+            long selfId1 = event.path("self_id").asLong(); // ← 关键！OneBot 事件自带 self_id
+            logger.debug("👤 user_id={}, self_id={}", userId1, selfId1);
             // ✅ 优先处理 API 响应（带 echo 字段）
             if (event.has("echo")) {
                 String echo = event.get("echo").asText();
@@ -169,12 +172,8 @@ public class Main extends WebSocketClient {
     public void reconnect() {
         try {
             logger.info("🔄 尝试重连...");
-            Main newBot = new Main(new URI(wsUrl));
-            newBot.connect();
-            newBot.init();
-            while (!newBot.isClosed()) {
-                Thread.sleep(1000);
-            }
+            this.connect();
+            logger.info("✅ 重连成功");
         } catch (Exception e) {
             logger.error("⚠️ 重连失败，10秒后再次尝试...", e);
             ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
@@ -210,6 +209,8 @@ public class Main extends WebSocketClient {
 
     // ===== 消息发送方法 =====
     public void sendReply(JsonNode msg, String reply) {
+        String traceId = "send_" + System.currentTimeMillis() + "_" + ThreadLocalRandom.current().nextInt(1000);
+        logger.debug("📤 [{}] 发送群聊回复: {}", traceId, reply);
         try {
             ObjectNode action = MAPPER.createObjectNode();
             String msgType = msg.path("message_type").asText();
@@ -231,6 +232,8 @@ public class Main extends WebSocketClient {
     }
 
     public void sendPrivateReply(long userId, String reply) {
+        String traceId = "send_" + System.currentTimeMillis() + "_" + ThreadLocalRandom.current().nextInt(1000);
+        logger.debug("📤 [{}] 发送群聊回复: {}", traceId, reply);
         try {
             ObjectNode action = MAPPER.createObjectNode();
             action.put("action", "send_private_msg");
@@ -245,6 +248,8 @@ public class Main extends WebSocketClient {
     }
 
     public void sendGroupReply(long groupId, String reply) {
+        String traceId = "send_" + System.currentTimeMillis() + "_" + ThreadLocalRandom.current().nextInt(1000);
+        logger.debug("📤 [{}] 发送群聊回复: {}", traceId, reply);
         try {
             ObjectNode action = MAPPER.createObjectNode();
             action.put("action", "send_group_msg");

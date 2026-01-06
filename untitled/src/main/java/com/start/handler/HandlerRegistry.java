@@ -30,10 +30,11 @@ public class HandlerRegistry {
             if (handler.match(message)) {
                 handler.handle(message, bot);
                 return; // 找到第一个匹配就执行并退出
-            }else {
-                log.debug("未找到匹配的handle");
             }
+
+
         }
+        log.debug("未找到匹配的handle");
         // 可选：默认回复
 //         bot.sendReply(message, "😅 我还不会这个命令，输入「帮助」查看指令");
     }

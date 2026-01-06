@@ -5,9 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.config.BotConfig;
 
+import com.start.config.DatabaseConfig;
+import com.start.handler.AIHandler;
 import com.start.handler.HandlerRegistry;
-import com.start.service.OneBotWsService;
-import com.start.service.SpamDetector;
+import com.start.service.*;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 import org.slf4j.Logger;
@@ -32,6 +33,13 @@ public class Main extends WebSocketClient {
     private static String wsUrl;
     private static final Set<Long> ALLOWED_GROUPS = BotConfig.getAllowedGroups();
     private static final Set<Long> ALLOWED_PRIVATE_USERS = BotConfig.getAllowedPrivateUsers();
+    private UserService userService;
+    private MessageService messageService;
+    private ConversationService conversationService;
+    private PersonalityService personalityService;
+    private AIDatabaseService aiDatabaseService;
+    private BaiLianService baiLianService;
+    private HandlerRegistry handlerRegistry;
 
     // ===== 新增：用于处理 WebSocket API 响应 =====
     private final Map<String, CompletableFuture<JsonNode>> pendingRequests = new ConcurrentHashMap<>();
@@ -64,8 +72,15 @@ public class Main extends WebSocketClient {
 
     public Main(URI serverUri) {
         super(serverUri);
-
+        DatabaseConfig.initConnectionPool();
         this.oneBotWsService = new OneBotWsService(this); // 初始化 WebSocket API 服务
+        this.userService = new UserService();
+        this.messageService = new MessageService();
+        this.conversationService = new ConversationService();
+        this.personalityService = new PersonalityService();
+        this.aiDatabaseService = new AIDatabaseService();
+        this.handlerRegistry = new HandlerRegistry();
+
     }
 
     public void init() {

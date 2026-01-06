@@ -6,3 +6,11 @@ source ~/py/bin/activate
 ps aux | grep java
 测试
 python ./screenshot.py kkrb-overview /tmp/kkrb.png
+ssh隧穿
+ssh -i ~/.ssh/id_ed25519 -L 3307:localhost:3306 -N -f alice@154.8.213.134
+数据库密码
+My$qlR00t#2026
+
+DATABASE candybear_db
+
+CREATE USER 'candybear'@'localhost' IDENTIFIED BY 'YourStrongPassword123!';

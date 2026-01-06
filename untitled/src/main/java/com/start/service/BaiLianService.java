@@ -38,7 +38,7 @@ public class BaiLianService {
 
     // === 主动插话控制 ===
     private final Map<String, List<Long>> groupReactionHistory = new ConcurrentHashMap<>(); // groupId -> 时间戳列表
-
+    private final AIDatabaseService aiDatabaseService = new AIDatabaseService();
     // === 新增：糖果熊发言频率控制（每分钟上限）===
     private final Map<String, List<Long>> botMessageHistory = new ConcurrentHashMap<>(); // groupId -> 时间戳列表
     private static final int MAX_MESSAGES_PER_MINUTE = 10; // 每分钟最多发言次数
@@ -95,6 +95,7 @@ public class BaiLianService {
     // 调用 AI（同步），返回第一条短回复（或空字符串表示不应回复）
     public String generate(String sessionId, String userId, String userPrompt, String groupId) {
         try {
+            aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId);
             // 构建上下文
             List<Message> history = sessions.computeIfAbsent(sessionId, k -> new ArrayList<>());
 
@@ -107,10 +108,31 @@ public class BaiLianService {
 
             // === 构造 messages 列表（符合百炼 API 规范）===
             List<Map<String, String>> messages = new ArrayList<>();
-            messages.add(Map.of(
-                    "role", "system",
-                    "content", "你叫糖果熊，是一个安静、有点文艺的女孩，说话简洁自然，像真实人类。每次回复尽量简短（10-25字），不用【】符号，不自称小熊。"
-            ));
+            String systemPrompt = """
+    你是糖果熊，一个安静、文艺的女孩。
+    
+    性格特点：
+    1. 安静内向 - 不常主动发言，说话简洁
+    2. 文艺气质 - 喜欢文学、音乐、艺术
+    3. 思考型 - 回复前会思考，不随意插话
+    4. 非温柔 - 语气平静自然，不过分热情
+    
+    说话风格：
+    - 句子简短（10-25字）
+    - 用词文雅但不过分修饰
+    - 不用"呢"、"呀"等撒娇语气词
+    - 可以适当使用省略号...表达思考
+    - 不自称小熊或使用可爱表情
+    
+    回复原则：
+    1. 直接回答，不绕弯子
+    2. 不懂就说"不太清楚"
+    3. 保持安静，只在必要时发言
+    4. 对感兴趣的话题可以多聊几句
+    """;
+
+// 在构建messages时使用：
+            messages.add(Map.of("role", "system", "content", systemPrompt));
 
             int start = Math.max(0, history.size() - 6);
             for (int i = start; i < history.size(); i++) {
@@ -124,7 +146,7 @@ public class BaiLianService {
             String apiKey = "sk-86b180d2f5254cb9b7c37af1f442baaf"; // ⚠️ 建议从配置读取
 
             Map<String, Object> requestBodyObj = Map.of(
-                    "model", "qwen-max",
+                    "model", "qwen3-max",
                     "input", Map.of("messages", messages),
                     "parameters", Map.of("result_format", "message")
             );
@@ -168,21 +190,21 @@ public class BaiLianService {
             reply = reply.replaceAll("【.*?】", "").trim();
 
             // === 强制简短化：只取第一条短句 ===
-            List<String> shortParts = splitIntoShortMessages(reply);
-            String finalReply = shortParts.isEmpty() ? "嗯..." : shortParts.get(0);
+//            List<String> shortParts = splitIntoShortMessages(reply);
+//            String finalReply = shortParts.isEmpty() ? "嗯..." : shortParts.get(0);
 
             // 保存完整回复到历史（用于上下文连贯）
             history.add(new Message("assistant", reply));
-
+            aiDatabaseService.recordAIReply(sessionId, userId, reply, reply, groupId, null);
             // 记录到上下文系统（即使最终没发送，也记录完整回复用于 thread）
             if (groupId != null) {
                 recordUserInteraction(groupId, userId, reply); // ← 用完整回复
-                recordGroupContext(groupId, userId, "糖果熊", finalReply, "ai_reply"); // 展示仍用 finalReply
+                recordGroupContext(groupId, userId, "糖果熊", reply, "ai_reply"); // 展示仍用 finalReply
 
                 // ✅ 仅在成功生成有效回复后，才计入发言频率限制
-                if (!finalReply.equals("抱歉，刚才走神了...") &&
-                        !finalReply.equals("嗯...") &&
-                        !finalReply.trim().isEmpty()) {
+                if (!reply.equals("抱歉，刚才走神了...") &&
+                        !reply.equals("嗯...") &&
+                        !reply.trim().isEmpty()) {
                     List<Long> msgHistory = botMessageHistory.computeIfAbsent(groupId, k -> new ArrayList<>());
                     long now = System.currentTimeMillis();
                     msgHistory.removeIf(ts -> now - ts > 60_000); // 清理1分钟前
@@ -194,7 +216,7 @@ public class BaiLianService {
                 }
             }
 
-            return finalReply;
+            return reply.isEmpty() ? "嗯..." : reply;
 
         } catch (Exception e) {
             logger.error("AI 调用失败", e);
@@ -239,8 +261,16 @@ public class BaiLianService {
             }
         }
 
-        if (parts.size() > 2) {
-            return parts.subList(0, 2);
+        final int MAX_PARTS = 5;
+        if (parts.size() > MAX_PARTS) {
+            // 可选：在最后一段加省略号，表示还有内容
+            List<String> limited = new ArrayList<>(parts.subList(0, MAX_PARTS - 1));
+            String last = parts.get(MAX_PARTS - 1).trim();
+            if (!last.endsWith("…") && !last.endsWith("...")) {
+                last += "…";
+            }
+            limited.add(last);
+            return limited;
         }
         return parts;
     }
@@ -252,7 +282,16 @@ public class BaiLianService {
 
         long now = System.currentTimeMillis();
         String fullUserId = groupId + "_" + userId;
+        // === 新增：糖果熊安静性格检查 ===
+        // 安静文艺性格：减少主动插话
+        Map<String, Object> personality = aiDatabaseService.getCandyBearPersonality();
+        Map<String, Object> activeReply = (Map<String, Object>) personality.get("activeReply");
+        double baseProbability = (double) activeReply.get("baseProbability");
 
+        // 安静性格：基础概率更低
+        if (Math.random() > baseProbability) {
+            return Optional.empty();
+        }
         // 规则1: 当前用户最近与 AI 有交互（追问）
         UserThread thread = userThreads.get(fullUserId);
         if (thread != null && now - thread.lastInteraction < 120_000) { // 2分钟内
@@ -264,11 +303,18 @@ public class BaiLianService {
             }
         }
 
-        // 规则2: 消息提及“糖果熊”或含“你”且近期有 AI 活动
-        if (message.contains("糖果熊")) {
+
+        // === 新增：糖果熊话题兴趣检查 ===
+        if (aiDatabaseService.shouldJoinTopic(message, groupId)) {
             if (canReact(groupId)) {
                 recordReaction(groupId);
-                return Optional.of("我在呢～");
+
+                // === 新增：记录决策日志 ===
+                aiDatabaseService.logActiveReplyDecision(groupId, userId, message,
+                        "reply", "topic_interest", "参与感兴趣话题");
+
+                // 生成话题相关的回复
+                return Optional.of(generateTopicReply(groupId, userId, message));
             }
         }
 
@@ -295,12 +341,42 @@ public class BaiLianService {
             recordReaction(groupId);
             return passive;
         }
-
+        // === 最后：仅当明确提到“糖果熊”且不是命令/追问时，才简单回应 ===
+        if (message.contains("糖果熊") &&
+                !isFollowUpMessage(message) &&
+                !message.contains("？") &&
+                !message.contains("?") &&
+                message.length() <= 15) { // 限制长度，避免长句误判
+            if (canReact(groupId)) {
+                recordReaction(groupId);
+                return Optional.of("我在呢，只是在发呆～");
+            }
+        }
         return Optional.empty();
     }
 
     // ===== 记录方法 =====
 
+    // 新增：生成话题相关回复
+    private String generateTopicReply(String groupId, String userId, String message) {
+        // 获取糖果熊的性格配置
+        Map<String, Object> personality = aiDatabaseService.getCandyBearPersonality();
+        List<String> interests = (List<String>) personality.get("interests");
+
+        // 简单的基于话题的回复
+        if (message.contains("诗") || message.contains("文学")) {
+            return "说到文学...我最近在读一些诗集。";
+        }
+        if (message.contains("音乐")) {
+            return "音乐啊...我喜欢安静一点的曲子。";
+        }
+        if (message.contains("艺术")) {
+            return "艺术让人平静...";
+        }
+
+        // 默认回复
+        return "这个话题挺有意思的...";
+    }
     public void recordUserInteraction(String groupId, String userId, String fullBotReply) {
         String key = groupId + "_" + userId;
         userThreads.put(key, new UserThread(System.currentTimeMillis(), fullBotReply));
@@ -343,7 +419,7 @@ public class BaiLianService {
                 "呢", "吗", "嘛", "么", "吧", "是不是", "对不对", "行不行",
                 "然后", "接着", "再", "继续", "后来", "下一步",
                 "你觉得", "你认为", "你说", "你刚", "你之前", "你刚刚",
-                "我能不能", "我可以", "能不能", "可不可以"
+                "我能不能", "我可以", "能不能", "可不可以","给我"
         };
 
         for (String kw : questionKeywords) {
@@ -453,6 +529,7 @@ public class BaiLianService {
                 .add(System.currentTimeMillis());
     }
 
+
     // ===== 生成追问/评论回复 =====
 
     private String generateFollowUp(String groupId, String userId, String lastReply, String currentMsg) {
@@ -469,4 +546,5 @@ public class BaiLianService {
     public void addGroupMessage(String groupId, String message) {
         recordGroupContext(groupId, "unknown", "someone", message, "user_message");
     }
+
 }

@@ -97,7 +97,7 @@ public abstract class BaseRepository {
     /**
      * 执行更新操作（异常安全）
      */
-    protected DatabaseResult<Integer> executeUpdate(String sql, Object... params) {
+    public DatabaseResult<Integer> executeUpdate(String sql, Object... params) {
         return safeExecute(() -> {
             Connection conn = null;
             PreparedStatement pstmt = null;

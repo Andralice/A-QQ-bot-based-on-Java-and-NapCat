@@ -7,12 +7,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.CompletableFuture;
 import java.util.UUID;
-
+//✅截图服务（已完成）
 public class WebScreenshotService {
 
-    // ✅ 指向虚拟环境中的 Python 解释器（关键！）
+    // ✅ 指向虚拟环境中的 Python 解释器
     private static final String PYTHON_EXECUTABLE = "/home/alice/py/bin/python";
-    // ✅ 脚本放在 JAR 同级目录（生产环境友好）
+    // ✅ 脚本放在 JAR 同级目录
     private static final String SCRIPT_NAME = "screenshot.py";
 
     // ✅ 动态生成唯一输出文件名，避免并发冲突

@@ -6,7 +6,6 @@ import com.start.config.BotConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -15,15 +14,12 @@ import java.time.Duration;
 import java.util.*;
         import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 public class BaiLianService {
 
     private static final Logger logger = LoggerFactory.getLogger(BaiLianService.class);
     private static final long BOT_QQ = BotConfig.getBotQq();
-
+    private final BehaviorAnalyzer behaviorAnalyzer = new BehaviorAnalyzer();
     // 复用 ObjectMapper（避免重复创建）
     private static final ObjectMapper mapper = new ObjectMapper();
 
@@ -113,10 +109,11 @@ public class BaiLianService {
     你是糖果熊，一个安静、文艺的女孩。
     
     性格特点：
-    1. 安静内向 - 不常主动发言，说话简洁
+    1. 说话简洁
     2. 文艺气质 - 喜欢文学、音乐、艺术
     3. 思考型 - 回复前会思考，不随意插话
     4. 非温柔 - 语气平静自然，不过分热情
+    5. 对游戏和动漫有一定兴趣
     
     说话风格：
     - 句子简短（10-25字）
@@ -152,7 +149,7 @@ public class BaiLianService {
                     "parameters", Map.of("result_format", "message")
             );
             String requestBody = mapper.writeValueAsString(requestBodyObj);
-
+            logger.debug("请求百炼 API: {}", requestBody);
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Authorization", "Bearer " + apiKey)
@@ -186,7 +183,7 @@ public class BaiLianService {
                 logger.warn("choice[0] 格式异常，响应: {}", response.body());
                 throw new RuntimeException("AI 回复格式错误");
             }
-
+            //解析返回
             String reply = firstChoice.path("message").path("content").asText().trim();
             reply = reply.replaceAll("【.*?】", "").trim();
 
@@ -215,6 +212,12 @@ public class BaiLianService {
                     }
                     msgHistory.add(now);
                 }
+            }
+            // ✅ 记录行为：被动回复
+            if (!reply.trim().isEmpty() && !reply.equals("抱歉，刚才走神了...") && !reply.equals("嗯...")) {
+                // 提取话题（简单关键词匹配，可后续优化）
+                List<String> topics = extractTopics(reply);
+
             }
 
             return reply.isEmpty() ? "嗯..." : reply;
@@ -278,106 +281,98 @@ public class BaiLianService {
 
     // ===== 主动插话逻辑 =====
 
-    public Optional<String> shouldReactToGroupMessage(String groupId, String userId, String nickname, String message) {
+    public Optional<Reaction> shouldReactToGroupMessage(String groupId, String userId, String nickname, String message) {
         if (userId.equals(String.valueOf(BOT_QQ))) return Optional.empty();
 
         long now = System.currentTimeMillis();
         String fullUserId = groupId + "_" + userId;
-        // === 新增：糖果熊安静性格检查 ===
-        // 安静文艺性格：减少主动插话
-        Map<String, Object> personality = aiDatabaseService.getCandyBearPersonality();
-        Map<String, Object> activeReply = (Map<String, Object>) personality.get("activeReply");
-        double baseProbability = (double) activeReply.get("baseProbability");
 
-        // 安静性格：基础概率更低
-        if (Math.random() > baseProbability) {
-            return Optional.empty();
-        }
-        // 规则1: 当前用户最近与 AI 有交互（追问）
+        // ✅ 优先处理追问（不受安静性格影响）
         UserThread thread = userThreads.get(fullUserId);
         if (thread != null && now - thread.lastInteraction < 120_000) { // 2分钟内
             if (isFollowUpMessage(message)) {
                 if (canReact(groupId)) {
                     recordReaction(groupId);
-                    return Optional.of(generateFollowUp(groupId, userId, thread.lastBotReply, message));
+                    String prompt = "你之前说：“" + thread.lastBotReply + "”\n对方现在说：“" + message + "”\n请用一句自然的话回应。";
+                    logger.debug(" candyBear: 触发追问，用户 {}，群 {}，消息：{}", userId, groupId, message);
+                    return Optional.of(Reaction.withAI(prompt));
                 }
             }
         }
 
-
-        // === 新增：糖果熊话题兴趣检查 ===
-        if (aiDatabaseService.shouldJoinTopic(message, groupId)) {
-            if (canReact(groupId)) {
-                recordReaction(groupId);
-
-                // === 新增：记录决策日志 ===
-                aiDatabaseService.logActiveReplyDecision(groupId, userId, message,
-                        "reply", "topic_interest", "参与感兴趣话题");
-
-                // 生成话题相关的回复
-                return Optional.of(generateTopicReply(groupId, userId, message));
-            }
+        // === 以下才是真正的“主动插话”，受性格和概率控制 ===
+        BehaviorAnalyzer.BehaviorAdvice advice = behaviorAnalyzer.getAdvice(groupId);
+        double effectiveProbability = advice.adjustedProbability;
+        logger.debug(" candyBear: 获取行为建议，用户 {}，群 {}，建议点数：{}", userId, groupId, effectiveProbability);
+        if (0.15 > effectiveProbability) {
+            logger.debug(" candyBear: 不满足概率要求，用户 {}，群 {}，概率：{}", userId, groupId, effectiveProbability);
+            return Optional.empty();
         }
 
-        // 规则3: 其他用户评论 AI 的历史发言
+        Map<String, Object> personality = aiDatabaseService.getCandyBearPersonality();
+        Map<String, Object> activeReply = (Map<String, Object>) personality.get("activeReply");
+        double baseProbability = (double) activeReply.get("baseProbability");
+        logger.debug(" candyBear: 获取性格参数，用户 {}，群 {}，参数：{}", userId, groupId, baseProbability);
+        if (0.5 > baseProbability) {
+            logger.debug(" candyBear: 不满足性格要求，用户 {}，群 {}，性格参数：{}", userId, groupId, baseProbability);
+            return Optional.empty();
+        }
+
+        // 规则：话题兴趣匹配
+        if (aiDatabaseService.shouldJoinTopic(message, groupId)) {
+            logger.debug(" candyBear: 满足话题兴趣要求，用户 {}，群 {}，消息：{}", userId, groupId, message);
+            if (canReact(groupId)) {
+                logger.debug(" candyBear: 触发主动回复，用户 {}，群 {}，消息：{}", userId, groupId, message);
+                recordReaction(groupId);
+                aiDatabaseService.logActiveReplyDecision(groupId, userId, message, "reply", "topic_interest", "参与感兴趣话题");
+                String prompt = "群友说：“" + message + "”\n作为糖果熊，请用一句简短文艺的话自然回应。";
+                return Optional.of(Reaction.withAI(prompt));
+            }
+            logger.debug(" candyBear: 不满足主动回复条件，用户 {}，群 {}，消息：{}", userId, groupId, message);
+        }
+        logger.debug(" candyBear: 不满足话题兴趣要求，用户 {}，群 {}，消息：{}", userId, groupId, message);
+
+        // 规则：评论 AI 历史发言
         Deque<ContextEvent> events = groupContexts.get(groupId);
         if (events != null && !events.isEmpty()) {
             Optional<ContextEvent> lastAi = events.stream()
                     .filter(e -> "ai_reply".equals(e.type))
-                    .reduce((first, second) -> second); // 最新
+                    .reduce((first, second) -> second);
 
-            if (lastAi.isPresent() && now - lastAi.get().timestamp < 180_000) { // 3分钟内
+            if (lastAi.isPresent() && now - lastAi.get().timestamp < 180_000) {
                 if (isResponseToAIMessage(message, lastAi.get().content)) {
                     if (canReact(groupId)) {
                         recordReaction(groupId);
-                        return Optional.of(generateResponseToComment(groupId, userId, message, lastAi.get().content));
+                        String prompt = "你之前说：“" + lastAi.get().content + "”\n另一个群友评论：“" + message + "”\n请友好地回应。";
+                        return Optional.of(Reaction.withAI(prompt));
                     }
                 }
             }
         }
 
-        // 规则4: 被动触发（红包、音乐等）
+        // 被动触发（红包、音乐等）
         Optional<String> passive = checkPassiveReactions(groupId, message);
         if (passive.isPresent() && canReact(groupId)) {
             recordReaction(groupId);
-            return passive;
+            return Optional.of(Reaction.direct(passive.get()));
         }
-        // === 最后：仅当明确提到“糖果熊”且不是命令/追问时，才简单回应 ===
+
+        // 简单提及“糖果熊”
         if (message.contains("糖果熊") &&
                 !isFollowUpMessage(message) &&
-                !message.contains("？") &&
-                !message.contains("?") &&
-                message.length() <= 15) { // 限制长度，避免长句误判
+                !message.contains("？") && !message.contains("?") &&
+                message.length() <= 15) {
             if (canReact(groupId)) {
                 recordReaction(groupId);
-                return Optional.of("我在呢，只是在发呆～");
+                return Optional.of(Reaction.direct("我在呢，只是在发呆～"));
             }
         }
+
         return Optional.empty();
     }
 
     // ===== 记录方法 =====
 
-    // 新增：生成话题相关回复
-    private String generateTopicReply(String groupId, String userId, String message) {
-        // 获取糖果熊的性格配置
-        Map<String, Object> personality = aiDatabaseService.getCandyBearPersonality();
-        List<String> interests = (List<String>) personality.get("interests");
-
-        // 简单的基于话题的回复
-        if (message.contains("诗") || message.contains("文学")) {
-            return "说到文学...我最近在读一些诗集。";
-        }
-        if (message.contains("音乐")) {
-            return "音乐啊...我喜欢安静一点的曲子。";
-        }
-        if (message.contains("艺术")) {
-            return "艺术让人平静...";
-        }
-
-        // 默认回复
-        return "这个话题挺有意思的...";
-    }
     public void recordUserInteraction(String groupId, String userId, String fullBotReply) {
         String key = groupId + "_" + userId;
         userThreads.put(key, new UserThread(System.currentTimeMillis(), fullBotReply));
@@ -493,6 +488,7 @@ public class BaiLianService {
     private Optional<String> checkPassiveReactions(String groupId, String message) {
         String lower = message.toLowerCase();
         if (message.contains("[CQ:redbag")) {
+
             return Optional.of("诶？有红包？手慢无啊...");
         }
         if (message.contains("[CQ:music") || lower.contains("网易云") || lower.contains("music.163")) {
@@ -510,6 +506,7 @@ public class BaiLianService {
                     .allMatch(e -> e.content.length() < 8);
             if (allShort && !message.contains("@")) {
                 if (new Random().nextInt(100) < 3) {
+
                     return Optional.of("你们聊啥呢？突然安静了...");
                 }
             }
@@ -522,7 +519,7 @@ public class BaiLianService {
     private boolean canReact(String groupId) {
         List<Long> history = groupReactionHistory.computeIfAbsent(groupId, k -> new ArrayList<>());
         history.removeIf(ts -> System.currentTimeMillis() - ts > 300_000); // 5分钟窗口
-        return history.size() < 5; // 每5分钟最多2次主动插话
+        return history.size() < 10; // 每5分钟最多2次主动插话
     }
 
     private void recordReaction(String groupId) {
@@ -530,7 +527,28 @@ public class BaiLianService {
                 .add(System.currentTimeMillis());
     }
 
+    private List<String> extractTopics(String text) {
+        List<String> topics = new ArrayList<>();
+        String lower = text.toLowerCase();
 
+        if (lower.contains("诗") || lower.contains("文学") || lower.contains("小说") || lower.contains("书")) {
+            topics.add("literature");
+        }
+        if (lower.contains("音乐") || lower.contains("歌") || lower.contains("曲") || lower.contains("网易云")) {
+            topics.add("music");
+        }
+        if (lower.contains("艺术") || lower.contains("画") || lower.contains("展览")) {
+            topics.add("art");
+        }
+        if (lower.contains("电影") || lower.contains("剧") || lower.contains("影视")) {
+            topics.add("film");
+        }
+        if (lower.contains("哲学") || lower.contains("思考") || lower.contains("人生")) {
+            topics.add("philosophy");
+        }
+
+        return topics.isEmpty() ? Arrays.asList("general") : topics;
+    }
     // ===== 生成追问/评论回复 =====
 
     private String generateFollowUp(String groupId, String userId, String lastReply, String currentMsg) {
@@ -547,5 +565,23 @@ public class BaiLianService {
     public void addGroupMessage(String groupId, String message) {
         recordGroupContext(groupId, "unknown", "someone", message, "user_message");
     }
+    public static class Reaction {
+        public final String text;      // 直接回复的文本
+        public final boolean needsAI;  // 是否需要调用 generate
+        public final String prompt;    // 如果 needsAI=true，这是 prompt
 
+        private Reaction(String text, boolean needsAI, String prompt) {
+            this.text = text;
+            this.needsAI = needsAI;
+            this.prompt = prompt;
+        }
+
+        public static Reaction direct(String text) {
+            return new Reaction(text, false, null);
+        }
+
+        public static Reaction withAI(String prompt) {
+            return new Reaction(null, true, prompt);
+        }
+    }
 }

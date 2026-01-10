@@ -26,7 +26,7 @@ public class SanjiaoHandler implements MessageHandler {
             plainText = "";
         }
         plainText = plainText.trim();
-        boolean isExactKeyword = "特勤处".equals(plainText) || "制作".equals(plainText);
+        boolean isExactKeyword = "特勤处".equals(plainText) || "脑机".equals(plainText);
 
         return isExactKeyword;
     }
@@ -34,13 +34,24 @@ public class SanjiaoHandler implements MessageHandler {
     @Override
     public void handle(JsonNode message, Main bot) {
         long groupId = message.get("group_id").asLong();
+        String plainText = MessageUtil.extractPlainText(message.path("message"));
 
-        // 异步执行截图
-        CompletableFuture<String> future = screenshotService.takeScreenshot("kkrb-overview");
+        CompletableFuture<String> future = null;
 
+        if ("特勤处".equals(plainText)) {
+            future = screenshotService.takeScreenshot("kkrb-overview");
+        } else if ("脑机".equals(plainText)) {
+            future = screenshotService.takeScreenshot("kkrb-overview-2");
+        }
+
+        // 如果没有匹配命令，直接返回（不处理）
+        if (future == null) {
+            return;
+        }
+
+        // 异步执行截图后续操作
         future.thenCompose(imagePath -> {
             try {
-                // 读取图片并自动清理临时文件
                 byte[] imageBytes = screenshotService.readAndCleanupImage(imagePath);
                 String base64 = Base64.getEncoder().encodeToString(imageBytes);
                 String cqImage = "[CQ:image,file=base64://" + base64 + "]";
@@ -53,10 +64,9 @@ public class SanjiaoHandler implements MessageHandler {
             String errorMsg = "❌ 特勤处截图失败";
             Throwable cause = ex.getCause();
             if (cause != null && cause.getMessage() != null) {
-                // 截取关键错误信息，避免泄露路径等敏感内容
                 String msg = cause.getMessage();
-                if (msg.length() > 50) {
-                    msg = msg.substring(0, 50) + "...";
+                if (msg.length() > 100) {
+                    msg = msg.substring(0,100) + "...";
                 }
                 errorMsg += "：" + msg;
             }

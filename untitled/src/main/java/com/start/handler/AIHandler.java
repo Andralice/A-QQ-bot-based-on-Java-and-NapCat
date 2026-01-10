@@ -69,8 +69,8 @@ public class AIHandler implements MessageHandler {
             return;
         }
 
-        // 主动插话判断（⚠️ 此处也可能触发发言，需走完整流程）
-        Optional<String> reaction = aiService.shouldReactToGroupMessage(
+        // 主动插话判断
+        Optional<BaiLianService.Reaction> reaction = aiService.shouldReactToGroupMessage(
                 String.valueOf(groupId),
                 String.valueOf(userId),
                 senderNick,
@@ -78,8 +78,20 @@ public class AIHandler implements MessageHandler {
         );
 
         if (reaction.isPresent()) {
-            // ✅ 主动插话也必须拆分 + 延迟发送（且受频率限制）
-            sendSplitGroupReplies(bot, groupId, reaction.get());
+            BaiLianService.Reaction r = reaction.get();
+            if (r.needsAI) {
+                // 异步调用 generate
+                new Thread(() -> {
+                    String reply = aiService.generate("group_" + groupId + "_" + userId, String.valueOf(userId), r.prompt, String.valueOf(groupId));
+                    if (!reply.trim().isEmpty() && !reply.equals("抱歉，刚才走神了...") && !reply.equals("嗯...")) {
+                        sendSplitGroupReplies(bot, groupId, reply);
+                        aiService.recordUserInteraction(String.valueOf(groupId), String.valueOf(userId), reply);
+                        aiService.recordGroupContext(String.valueOf(groupId), String.valueOf(userId), "糖果熊", reply, "ai_reply");
+                    }
+                }).start();
+            } else {
+                sendSplitGroupReplies(bot, groupId, r.text);
+            }
         }
     }
 

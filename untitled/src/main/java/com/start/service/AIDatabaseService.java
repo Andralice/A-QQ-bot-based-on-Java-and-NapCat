@@ -3,7 +3,11 @@
 // service/AIDatabaseService.java
 package com.start.service;
 
+import com.start.Main;
 import com.start.repository.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -12,7 +16,7 @@ public class AIDatabaseService {
     private final UserRepository userRepo = new UserRepository();
     private final MessageRepository messageRepo = new MessageRepository();
     private final ConversationThreadRepository threadRepo = new ConversationThreadRepository();
-
+    private static final Logger logger = LoggerFactory.getLogger(Main.class);
     /**
      * 记录用户消息
      */
@@ -41,9 +45,10 @@ public class AIDatabaseService {
             }
 
             messageRepo.saveMessage(messageData);
+            logger.debug("记录用户消息成功");
 
         } catch (Exception e) {
-            System.err.println("记录用户消息失败: " + e.getMessage());
+            logger.warn("记录用户消息异常: ");
         }
     }
 
@@ -89,9 +94,11 @@ public class AIDatabaseService {
                 return result.getData();
             } else {
                 System.err.println("获取对话历史失败: " + result.getError());
+                logger.debug("获取对话历史失败: " + result.getError());
             }
         } catch (Exception e) {
             System.err.println("获取对话历史异常: " + e.getMessage());
+            logger.debug("获取对话历史异常: " + e.getMessage());
         }
         return Collections.emptyList();
     }
@@ -107,6 +114,7 @@ public class AIDatabaseService {
             }
         } catch (Exception e) {
             System.err.println("获取用户话题偏好失败: " + e.getMessage());
+            logger.debug("获取用户话题偏好失败: " + e.getMessage());
         }
         return Collections.emptyList();
     }
@@ -130,6 +138,7 @@ public class AIDatabaseService {
 
         } catch (Exception e) {
             System.err.println("记录主动回复决策失败: " + e.getMessage());
+            logger.debug("记录主动回复决策失败: " + e.getMessage());
         }
     }
 
@@ -151,7 +160,7 @@ public class AIDatabaseService {
         personality.put("speechStyle", speechStyle);
 
         Map<String, Object> activeReply = new HashMap<>();
-        activeReply.put("baseProbability", 0.2);
+        activeReply.put("baseProbability", 0.8);
         activeReply.put("interestMultiplier", 1.5);
         activeReply.put("maxPerMinute", 3);
         activeReply.put("coolDownSeconds", 30);
@@ -164,10 +173,9 @@ public class AIDatabaseService {
      * 检查糖果熊是否应该主动参与话题
      */
     public boolean shouldJoinTopic(String message, String groupId) {
-        Set<String> interestTopics = Set.of("文学", "诗歌", "音乐", "艺术", "哲学", "思考");
+        Set<String> interestTopics = Set.of("文学", "诗歌", "音乐", "艺术", "哲学", "思考","游戏");
         String topics = extractTopics(message);
-
-        for (String interest : interestTopics) {
+        logger.debug("candyBear: {}, groupId: {}", topics, interestTopics);        for (String interest : interestTopics) {
             if (topics.contains(interest)) {
                 return Math.random() < 0.5;
             }
@@ -184,6 +192,7 @@ public class AIDatabaseService {
         if (text.contains("艺术") || text.contains("画") || text.contains("美术")) topics.add("艺术");
         if (text.contains("哲学") || text.contains("思考") || text.contains("人生")) topics.add("哲学");
         if (text.contains("自然") || text.contains("风景") || text.contains("天空")) topics.add("自然");
+        if (text.contains("游戏") || text.contains("运动") || text.contains("板绘")) topics.add("游戏");
         return String.join(",", topics);
     }
 

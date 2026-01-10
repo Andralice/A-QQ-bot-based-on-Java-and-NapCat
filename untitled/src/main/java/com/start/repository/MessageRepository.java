@@ -205,7 +205,7 @@ public class MessageRepository extends BaseRepository {
         }
     }
 
-    private Map<String, Object> mapToHashMap(ResultSet rs) {
+    public Map<String, Object> mapToHashMap(ResultSet rs) {
         try{
         Map<String, Object> map = new HashMap<>();
         ResultSetMetaData metaData = rs.getMetaData();
@@ -218,6 +218,30 @@ public class MessageRepository extends BaseRepository {
         catch (Exception e){
             return null;
         }
+    }
+
+
+    public DatabaseResult<List<Map<String, Object>>> queryMessagesWithActiveFlag(String groupId) {
+        String sql = """
+        SELECT 
+            m.id,
+            m.content,
+            m.topics,
+            m.created_at,
+            CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS is_active
+        FROM messages m
+        LEFT JOIN active_reply_logs a 
+            ON m.group_id = a.group_id
+            AND m.content = a.replied_content
+            AND a.decision = 'reply'
+            AND ABS(TIMESTAMPDIFF(SECOND, m.created_at, a.created_at)) <= 10
+        WHERE m.group_id = ?
+          AND m.is_robot_reply = TRUE
+          AND m.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        ORDER BY m.created_at DESC
+        LIMIT 2000
+        """;
+        return executeQuery(sql, this::mapToHashMap, groupId);
     }
 
     private String getStringValue(Map<String, Object> data, String key, String defaultValue) {

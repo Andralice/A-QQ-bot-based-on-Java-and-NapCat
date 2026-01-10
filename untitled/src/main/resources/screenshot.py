@@ -18,6 +18,10 @@ TASKS = {
     "stock-chart": {
         "url": "https://example.com/chart",
         "selector": ".chart-container"
+    },
+    "kkrb-overview-2": {
+        "url": "https://www.kkrb.net/?viewpage=view%2Foverview",
+        "selector": "#overview-bcic-container",
     }
 }
 

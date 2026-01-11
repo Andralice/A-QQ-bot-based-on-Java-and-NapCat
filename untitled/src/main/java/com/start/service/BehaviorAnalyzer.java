@@ -46,60 +46,6 @@ import org.slf4j.LoggerFactory;
      }
 
      /**
-      * 记录一次回复（✅ 保留原内存逻辑 + ✅ 新增数据库写入）
-      */
-     public void recordReply(String groupId, String reply, boolean isActive,
-                             List<String> topics) {
-         logger.debug("开始执行recordReply",reply);
-         // ✅ 第一步：执行原有的内存统计逻辑（完全保留）
-         BehaviorMetrics metrics = groupMetrics.computeIfAbsent(
-                 groupId, k -> new BehaviorMetrics());
-
-         metrics.totalReplies++;
-         if (isActive) metrics.activeReplies++;
-         else metrics.passiveReplies++;
-
-         metrics.avgReplyLength = (metrics.avgReplyLength * (metrics.totalReplies - 1)
-                 + reply.length()) / metrics.totalReplies;
-
-         for (String topic : topics) {
-             metrics.topicEngagement.put(topic,
-                     metrics.topicEngagement.getOrDefault(topic, 0) + 1);
-         }
-
-         metrics.lastAnalysisTime = LocalDateTime.now();
-
-         // ✅ 第二步：如果配置了数据库，则写入日志表（新增）
-         if (messageRepo != null && groupId != null && reply != null) {
-             try {
-                 // 📌 根据你的表结构调整 SQL
-                 String sql = """
-                    INSERT INTO active_reply_logs 
-                    (group_id, user_id, message_content, decision, decision_reason, 
-                     confidence, replied_content, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """;
-
-                 String decision = isActive ? "reply" : "no_reply";
-                 String reason = isActive ? "主动回复" : "被动忽略";
-                 Double confidence = 0.95; // 可根据业务调整
-                 logger.debug("记录写入数据库",decision);
-                 messageRepo.executeUpdate(sql,
-                         groupId,
-                         "bot", // 假设机器人用户ID为 "bot"
-                         "",   // message_content: 原始消息内容（可留空或传入）
-                         decision,
-                         reason,
-                         confidence,
-                         reply, // 实际回复内容
-                         new Date()); // created_at
-             } catch (Exception e) {
-                 System.err.println("Failed to log behavior to DB: " + e.getMessage());
-             }
-         }
-     }
-
-     /**
       * 获取行为建议（✅ 完全保留原逻辑）
       */
      public BehaviorAdvice getAdvice(String groupId) {

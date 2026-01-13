@@ -281,21 +281,23 @@ public class BaiLianService {
 
     // ===== 主动插话逻辑 =====
 
-    public Optional<Reaction> shouldReactToGroupMessage(String groupId, String userId, String nickname, String message) {
+    public Optional<Reaction> shouldReactToGroupMessage(String groupId, String userId, String nickname, String message,List<Long> ats) {
         if (userId.equals(String.valueOf(BOT_QQ))) return Optional.empty();
 
         long now = System.currentTimeMillis();
         String fullUserId = groupId + "_" + userId;
-
+        Long botQQ =356289140L;
         // ✅ 优先处理追问（不受安静性格影响）
         UserThread thread = userThreads.get(fullUserId);
-        if (thread != null && now - thread.lastInteraction < 120_000) { // 2分钟内
-            if (isFollowUpMessage(message)) {
-                if (canReact(groupId)) {
-                    recordReaction(groupId);
-                    String prompt = "你之前说：“" + thread.lastBotReply + "”\n对方现在说：“" + message + "”\n请用一句自然的话回应。";
-                    logger.debug(" candyBear: 触发追问，用户 {}，群 {}，消息：{}", userId, groupId, message);
-                    return Optional.of(Reaction.withAI(prompt));
+        if (thread != null && now - thread.lastInteraction < 120_000) {
+            if(ats.contains(botQQ)) {// 2分钟内
+                if (isFollowUpMessage(message)) {
+                    if (canReact(groupId)) {
+                        recordReaction(groupId);
+                        String prompt = "你之前说：“" + thread.lastBotReply + "”\n对方现在说：“" + message + "”\n请用一句自然的话回应。";
+                        logger.debug(" candyBear: 触发追问，用户 {}，群 {}，消息：{}", userId, groupId, message);
+                        return Optional.of(Reaction.withAI(prompt));
+                    }
                 }
             }
         }
@@ -390,12 +392,15 @@ public class BaiLianService {
 
     // ===== 辅助判断 =====
 
+
     private boolean isFollowUpMessage(String msg) {
+
         if (msg == null || msg.trim().isEmpty()) {
             return false;
         }
 
         String text = msg.trim();
+
         int len = text.length();
 
         if (len > 60) {

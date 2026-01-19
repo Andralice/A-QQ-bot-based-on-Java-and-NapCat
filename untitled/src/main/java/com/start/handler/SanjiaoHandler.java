@@ -26,7 +26,7 @@ public class SanjiaoHandler implements MessageHandler {
             plainText = "";
         }
         plainText = plainText.trim();
-        boolean isExactKeyword = "特勤处".equals(plainText) || "脑机".equals(plainText);
+        boolean isExactKeyword = "特勤处".equals(plainText) || "脑机".equals(plainText) || "密码".equals(plainText);
 
         return isExactKeyword;
     }
@@ -42,6 +42,8 @@ public class SanjiaoHandler implements MessageHandler {
             future = screenshotService.takeScreenshot("kkrb-overview");
         } else if ("脑机".equals(plainText)) {
             future = screenshotService.takeScreenshot("kkrb-overview-2");
+        } else if ("密码".equals(plainText)) {
+            future = screenshotService.takeScreenshot("kkrb-overview-3");
         }
 
         // 如果没有匹配命令，直接返回（不处理）

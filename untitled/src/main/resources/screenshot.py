@@ -22,6 +22,10 @@ TASKS = {
     "kkrb-overview-2": {
         "url": "https://www.kkrb.net/?viewpage=view%2Foverview",
         "selector": "#overview-bcic-container",
+    },
+    "kkrb-overview-3": {
+        "url": "https://www.kkrb.net/?viewpage=view%2Foverview",
+        "selector": "#overview-bonus-door-container",
     }
 }
 
@@ -67,7 +71,7 @@ def take_screenshot(task_name, output_path):
             print("📸 已保存初始状态截图: /tmp/debug-after-goto.png", file=sys.stderr)
 
             # 等待 JS 渲染
-            time.sleep(2)
+            time.sleep(1)
 
             # ✅ 精准关闭 layui 弹窗
             try:
@@ -80,13 +84,13 @@ def take_screenshot(task_name, output_path):
                 print("✅ 已点击‘确定’按钮关闭弹窗", file=sys.stderr)
 
                 # 短暂等待确保弹窗消失
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(250)
             except Exception as e:
                 print(f"⚠️ 弹窗未找到或点击失败（可能已自动关闭）: {e}", file=sys.stderr)
 
             # 等待目标容器加载
             try:
-                page.wait_for_selector(selector, timeout=30000)
+                page.wait_for_selector(selector, timeout=15000)
                 print(f"✅ 目标元素 '{selector}' 已加载", file=sys.stderr)
             except:
                 print(f"⚠️ 未找到目标元素 '{selector}'，尝试全页截图", file=sys.stderr)

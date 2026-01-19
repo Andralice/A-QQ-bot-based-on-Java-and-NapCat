@@ -16,7 +16,14 @@ import java.util.*;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 public class BaiLianService {
-
+    public static void setKnowledgeService(KeywordKnowledgeService service) {
+        if (service == null) {
+            throw new IllegalArgumentException("knowledgeService cannot be null");
+        }
+        BaiLianService.knowledgeService = service;
+        logger.info("KeywordKnowledgeService successfully injected.");
+    }
+    private static KeywordKnowledgeService knowledgeService;
     private static final Logger logger = LoggerFactory.getLogger(BaiLianService.class);
     private static final long BOT_QQ = BotConfig.getBotQq();
     private final BehaviorAnalyzer behaviorAnalyzer = new BehaviorAnalyzer();
@@ -89,67 +96,133 @@ public class BaiLianService {
     }
 
     // 调用 AI（同步），返回第一条短回复（或空字符串表示不应回复）
-    public String generate(String sessionId, String userId, String userPrompt, String groupId) {
+    /**
+     * 生成 AI 回复消息。
+     *
+     * 该方法整合了知识库检索（用于上下文增强）和百炼大模型调用，
+     * 并维护会话历史、频率控制等逻辑，最终返回 AI 的自然语言回复。
+     *
+     * @param sessionId   会话唯一标识，用于维护对话上下文
+     * @param userId      用户唯一标识
+     * @param userPrompt  用户当前输入的提示文本
+     * @param groupId     群组 ID（若为私聊可为 null）
+     * @return AI 生成的回复文本；若失败或被限流则返回默认兜底语句
+     */
+    public String generate(String sessionId, String userId, String userPrompt, String groupId,String nickname) {
+        // 记录本次 AI 调用日志，便于追踪和调试
         logger.info("🧠 AI 调用: sessionId={}, prompt=[{}]", sessionId, userPrompt);
+
+        // ====== 第1步：查询知识库（仅用于增强上下文，不直接返回） ======
+        // 调用知识库服务，根据用户提问、用户ID和群组ID进行语义检索
+        KeywordKnowledgeService.KnowledgeResult knowledgeResult =
+                knowledgeService.query(userPrompt, userId, groupId);
+
+        // 初始化知识库上下文为空字符串
+        String knowledgeContext = "";
+
+        // 判断是否命中有效知识条目：
+        // - 结果非空
+        // - 相似度分数 >= 0.3（阈值，避免低相关性干扰）
+        // - 答案存在且非空白
+        if (knowledgeResult != null &&
+                knowledgeResult.similarityScore >= 0.3 &&
+                knowledgeResult.answer != null &&
+                !knowledgeResult.answer.trim().isEmpty()) {
+
+            // 提取并清理答案内容作为上下文注入
+            knowledgeContext = knowledgeResult.answer.trim();
+
+            // 记录知识库命中日志，包含关键词和相似度分数，便于分析效果
+            logger.info("📚 知识库命中（用于上下文增强）: 关键词={}, 分数={}",
+                    knowledgeResult.matchedKeywords, knowledgeResult.similarityScore);
+        }
+
+        // ====== 第2步：走百炼AI流程（始终调用） ======
         try {
+            // 将用户消息持久化到数据库（用于审计、回溯等）
             aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId);
-            // 构建上下文
+
+            // 从 sessions 缓存中获取或初始化当前会话的历史消息列表
+            // sessions 是一个 ConcurrentHashMap<String, List<Message>>，用于短期内存缓存对话历史
             List<Message> history = sessions.computeIfAbsent(sessionId, k -> new ArrayList<>());
 
+            // 检查是否需要清空历史（例如上一次调用标记了需重置上下文）
+            // lastClearTime 是一个记录哪些 session 需要清空的临时标记 Map
             if (lastClearTime.containsKey(sessionId)) {
-                history.clear();
-                lastClearTime.remove(sessionId);
+                history.clear();                    // 清空历史
+                lastClearTime.remove(sessionId);    // 移除标记
             }
 
+            // 将当前用户消息追加到历史中
             history.add(new Message("user", userPrompt));
 
-            // === 构造 messages 列表（符合百炼 API 规范）===
-            List<Map<String, String>> messages = new ArrayList<>();
-            String systemPrompt = """
-    你是糖果熊，一个安静、文艺的女孩。
-    
-    性格特点：
-    1. 说话简洁
-    2. 文艺气质 - 喜欢文学、音乐、艺术
-    3. 思考型 - 回复前会思考，不随意插话
-    4. 非温柔 - 语气平静自然，不过分热情
-    5. 对游戏和动漫有一定兴趣
-    
-    说话风格：
-    - 句子简短（10-25字）
-    - 用词文雅但不过分修饰
-    - 不用"呢"、"呀"等撒娇语气词
-    - 可以适当使用省略号...表达思考
-    - 不自称小熊或使用可爱表情
-    
-    回复原则：
-    1. 直接回答，不绕弯子
-    2. 不懂就说"不太清楚"
-    3. 保持安静，只在必要时发言
-    4. 对感兴趣的话题可以多聊几句
-    """;
+            // 定义 AI 的系统角色设定（system prompt）
+            // 使用 Text Block（Java 15+）提高可读性
+            String baseSystemPrompt = """
+                你是糖果熊，一个安静、文艺的女孩。
 
-// 在构建messages时使用：
+                性格特点：
+                1. 说话简洁
+                2. 文艺气质 - 喜欢文学、音乐、艺术
+                3. 思考型 - 回复前会思考，不随意插话
+                4. 非温柔 - 语气平静自然，不过分热情
+                5. 对游戏和动漫有一定兴趣
+
+                说话风格：
+                - 句子简短（10-25字）
+                - 用词文雅但不过分修饰
+                - 不用"呢"、"呀"等撒娇语气词
+                - 可以适当使用省略号...表达思考
+                - 不自称小熊或使用可爱表情
+
+                回复原则：
+                1. 直接回答，不绕弯子
+                2. 不懂就说"不太清楚"
+                3. 保持安静，只在必要时发言
+                4. 对感兴趣的话题可以多聊几句
+        """;
+
+            // 若知识库有有效上下文，则将其附加到 system prompt 中
+            // 这样大模型在生成时能参考外部知识，实现 RAG（检索增强生成）
+            String systemPrompt = baseSystemPrompt+ "\n\n【当前与你对话的是】"+nickname+"\nQQ号: " + userId;
+            if (!knowledgeContext.isEmpty()) {
+                systemPrompt += "\n\n【参考信息】\n" + knowledgeContext;
+            }
+
+            // 构建发送给百炼 API 的 messages 数组
+            // 格式需符合 OpenAI-style：[{role: "system/user/assistant", content: "..."}]
+            List<Map<String, String>> messages = new ArrayList<>();
+
+            // 先加入 system prompt
             messages.add(Map.of("role", "system", "content", systemPrompt));
 
+            // 为避免上下文过长，只保留最近 6 条历史消息（含用户和 AI）
+            // 注意：这里未区分角色，直接截断尾部
             int start = Math.max(0, history.size() - 6);
             for (int i = start; i < history.size(); i++) {
                 Message msg = history.get(i);
+                // 确保 role 只为 "user" 或 "assistant"
                 String role = "user".equals(msg.role) ? "user" : "assistant";
                 messages.add(Map.of("role", role, "content", msg.content));
             }
 
-            // 调用百炼 API
+            // ========== 调用百炼大模型 API ==========
             String url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation";
-            String apiKey = "sk-86b180d2f5254cb9b7c37af1f442baaf"; // ⚠️ 建议从配置读取
+            // ⚠️ 安全警告：API Key 硬编码在代码中！应使用配置中心或环境变量管理
+            String apiKey = "sk-86b180d2f5254cb9b7c37af1f442baaf";
 
+            // 构造请求体 JSON 对象
             Map<String, Object> requestBodyObj = Map.of(
-                    "model", "qwen3-max",
-                    "input", Map.of("messages", messages),
-                    "parameters", Map.of("result_format", "message")
+                    "model", "qwen3-max",                     // 使用 Qwen3-Max 模型
+                    "input", Map.of("messages", messages),    // 输入消息列表
+                    "parameters", Map.of("result_format", "message") // 返回格式为 message
             );
+
+            // 使用 Jackson 序列化为 JSON 字符串
             String requestBody = mapper.writeValueAsString(requestBodyObj);
-            logger.debug("请求百炼 API: {}", requestBody);
+            logger.debug("请求百炼 API: {}", requestBody); // 记录调试日志（生产环境慎用）
+
+            // 构建 HTTP POST 请求
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Authorization", "Bearer " + apiKey)
@@ -157,74 +230,87 @@ public class BaiLianService {
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
 
+            // 同步发送请求并获取响应
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
+            // 检查 HTTP 状态码
             if (response.statusCode() != 200) {
                 logger.warn("百炼 API HTTP 错误 {}: {}", response.statusCode(), response.body());
                 throw new RuntimeException("AI 服务暂时不可用");
             }
 
+            // 解析 JSON 响应
             JsonNode root = mapper.readTree(response.body());
+            logger.debug("百炼 API 响应: {}", response.body());
 
+            // 检查业务错误码（百炼 API 成功时 code 为 "200"）
             if (root.has("code") && !"200".equals(root.path("code").asText())) {
                 String errorMsg = root.path("message").asText("未知错误");
                 logger.warn("百炼 API 业务错误: code={}, message={}", root.path("code").asText(), errorMsg);
                 throw new RuntimeException("AI 服务错误: " + errorMsg);
             }
 
+            // 提取 choices 数组（通常只取第一个）
             JsonNode choices = root.path("output").path("choices");
             if (!choices.isArray() || choices.isEmpty()) {
-                logger.warn("百炼 API 返回结果中缺少 choices，响应: {}", response.body());
+                logger.warn("百炼 API 返回结果中缺少 choices");
                 throw new RuntimeException("AI 未返回有效回复");
             }
 
             JsonNode firstChoice = choices.get(0);
             if (firstChoice == null || !firstChoice.has("message")) {
-                logger.warn("choice[0] 格式异常，响应: {}", response.body());
+                logger.warn("choice[0] 格式异常");
                 throw new RuntimeException("AI 回复格式错误");
             }
-            //解析返回
+
+            // 获取 AI 生成的文本内容，并去除首尾空白
             String reply = firstChoice.path("message").path("content").asText().trim();
+
+            // 清除可能由模型生成的引用标记（如 【1】、【参考】等）
             reply = reply.replaceAll("【.*?】", "").trim();
 
-            // === 强制简短化：只取第一条短句 ===
-//            List<String> shortParts = splitIntoShortMessages(reply);
-//            String finalReply = shortParts.isEmpty() ? "嗯..." : shortParts.get(0);
-
-            // 保存完整回复到历史（用于上下文连贯）
+            // 将 AI 回复保存到会话历史中，供后续对话使用
             history.add(new Message("assistant", reply));
-            aiDatabaseService.recordAIReply(sessionId, userId, reply, reply, groupId, null);
-            // 记录到上下文系统（即使最终没发送，也记录完整回复用于 thread）
-            if (groupId != null) {
-                recordUserInteraction(groupId, userId, reply); // ← 用完整回复
-                recordGroupContext(groupId, userId, "糖果熊", reply, "ai_reply"); // 展示仍用 finalReply
 
-                // ✅ 仅在成功生成有效回复后，才计入发言频率限制
+            // ========== 上下文与频率控制逻辑（针对群聊） ==========
+            if (groupId != null) {
+                // 记录用户交互行为（可用于活跃度分析）
+                recordUserInteraction(groupId, userId, reply);
+
+                // 更新群组上下文缓存（例如用于后续摘要或记忆）
+                recordGroupContext(groupId, userId, "糖果熊", reply, "ai_reply");
+
+                // 频率控制：防止 AI 在群内刷屏
+                // 跳过无意义回复（如“嗯...”、“抱歉...”或空回复）
                 if (!reply.equals("抱歉，刚才走神了...") &&
                         !reply.equals("嗯...") &&
                         !reply.trim().isEmpty()) {
+
+                    // 获取该群的 AI 发言时间戳列表（滑动窗口限流）
                     List<Long> msgHistory = botMessageHistory.computeIfAbsent(groupId, k -> new ArrayList<>());
                     long now = System.currentTimeMillis();
-                    msgHistory.removeIf(ts -> now - ts > 60_000); // 清理1分钟前
+
+                    // 清理超过 60 秒的历史记录（滑动窗口：1分钟）
+                    msgHistory.removeIf(ts -> now - ts > 60_000);
+
+                    // 如果过去1分钟内已发言 MAX_MESSAGES_PER_MINUTE 次，则跳过本次回复
                     if (msgHistory.size() >= MAX_MESSAGES_PER_MINUTE) {
-                        logger.debug("糖果熊在群 {} 发言已达上限（{}次/分钟），跳过回复", groupId, MAX_MESSAGES_PER_MINUTE);
-                        return ""; // 返回空表示不应回复
+                        logger.debug("糖果熊在群 {} 发言已达上限，跳过回复", groupId);
+                        return ""; // 返回空字符串表示不发送
                     }
+
+                    // 记录本次发言时间
                     msgHistory.add(now);
                 }
             }
-            // ✅ 记录行为：被动回复
-            if (!reply.trim().isEmpty() && !reply.equals("抱歉，刚才走神了...") && !reply.equals("嗯...")) {
-                // 提取话题（简单关键词匹配，可后续优化）
-                List<String> topics = extractTopics(reply);
 
-            }
-
+            // 返回最终回复；若为空则兜底为“嗯...”
             return reply.isEmpty() ? "嗯..." : reply;
 
         } catch (Exception e) {
+            // 捕获所有异常（网络、解析、限流等），保证服务可用性
             logger.error("AI 调用失败", e);
-            return "抱歉，刚才走神了...";
+            return "抱歉，刚才走神了..."; // 用户友好的兜底回复
         }
     }
 
@@ -551,15 +637,15 @@ public class BaiLianService {
     }
     // ===== 生成追问/评论回复 =====
 
-    private String generateFollowUp(String groupId, String userId, String lastReply, String currentMsg) {
-        String prompt = "你之前说：“" + lastReply + "”\n对方现在说：“" + currentMsg + "”\n请用一句自然的话回应。";
-        return generate("group_" + groupId + "_" + userId, userId, prompt, groupId);
-    }
-
-    private String generateResponseToComment(String groupId, String userId, String comment, String aiMsg) {
-        String prompt = "你之前说：“" + aiMsg + "”\n另一个群友评论：“" + comment + "”\n请友好地回应。";
-        return generate("group_" + groupId + "_" + userId, userId, prompt, groupId);
-    }
+//    private String generateFollowUp(String groupId, String userId, String lastReply, String currentMsg) {
+//        String prompt = "你之前说：“" + lastReply + "”\n对方现在说：“" + currentMsg + "”\n请用一句自然的话回应。";
+//        return generate("group_" + groupId + "_" + userId, userId, prompt, groupId);
+//    }
+//
+//    private String generateResponseToComment(String groupId, String userId, String comment, String aiMsg) {
+//        String prompt = "你之前说：“" + aiMsg + "”\n另一个群友评论：“" + comment + "”\n请友好地回应。";
+//        return generate("group_" + groupId + "_" + userId, userId, prompt, groupId);
+//    }
 
     // ===== 群消息记录 =====
     public void addGroupMessage(String groupId, String message) {

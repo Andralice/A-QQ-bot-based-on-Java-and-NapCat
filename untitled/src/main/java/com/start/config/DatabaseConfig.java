@@ -187,4 +187,13 @@ public class DatabaseConfig {
 
         return props;
     }
+    public static HikariDataSource getDataSource() {
+        if (!initialized) {
+            initConnectionPool();
+        }
+        if (dataSource == null || dataSource.isClosed()) {
+            throw new IllegalStateException("数据库连接池初始化失败或已关闭");
+        }
+        return dataSource;
+    }
 }

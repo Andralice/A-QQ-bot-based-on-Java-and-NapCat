@@ -8,11 +8,14 @@ import com.hankcs.hanlp.seg.common.Term;
 import com.zaxxer.hikari.HikariDataSource;
 import lombok.Getter;
 import lombok.Setter;
+import org.slf4j.Logger;
 
 // 标准 Java SQL 和集合工具类
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.slf4j.LoggerFactory;
 
 /**
  * 关键词匹配知识库管理器
@@ -24,7 +27,7 @@ public class KeywordKnowledgeService { // ✅ 修正1: 类名应为 KeywordKnowl
 
     // 数据库连接池（由外部传入）
     private final HikariDataSource dataSource;
-
+    private static final Logger logger = LoggerFactory. getLogger(KeywordKnowledgeService.class);
     // 缓存系统：
     // keywordCache: 每个关键词 -> 包含该关键词的所有知识条目（用于快速检索）
     private final Map<String, List<KnowledgeItem>> keywordCache;
@@ -91,7 +94,7 @@ public class KeywordKnowledgeService { // ✅ 修正1: 类名应为 KeywordKnowl
             }
 
             // 从 pattern + answer 中提取关键词
-            this.keywords = extractKeywords(patternStr + " " + answer);
+            this.keywords = extractKeywordsFromText(patternStr + " " + answer, KeywordKnowledgeService.this.stopWords);
         }
 
         /**
@@ -103,36 +106,51 @@ public class KeywordKnowledgeService { // ✅ 修正1: 类名应为 KeywordKnowl
         float calculateMatchScore(String question, Set<String> questionKeywords) {
             float score = 0;
 
-            // 1. 完全匹配：如果用户问题包含任意一个 pattern，直接 +1 分（最高权重）
-            String lowerQuestion = question.toLowerCase();
+            // === 方案一：Pattern 关键词重合度（替代 contains）===
+            float bestPatternOverlap = 0.0f;
             for (String pattern : patterns) {
-                if (lowerQuestion.contains(pattern.toLowerCase())) {
-                    score += 1.0f;
+                if (pattern == null || pattern.trim().isEmpty()) continue;
+
+                // 提取该 pattern 的关键词（使用当前实例的 stopWords）
+                Set<String> patternKws = extractKeywordsFromText(pattern, KeywordKnowledgeService.this.stopWords);
+                if (patternKws.isEmpty()) continue;
+
+                // 计算重合数
+                int overlap = 0;
+                for (String kw : patternKws) {
+                    if (questionKeywords.contains(kw)) {
+                        overlap++;
+                    }
                 }
+                float ratio = (float) overlap / patternKws.size();
+                bestPatternOverlap = Math.max(bestPatternOverlap, ratio);
             }
 
-            // 2. 关键词匹配：计算关键词重合比例，最多贡献 0.8 分
+            // 如果重合度 >= 0.5，给予高分（最高 1.0）
+            if (bestPatternOverlap >= 0.5f) {
+                score += bestPatternOverlap * 1.0f; // 例如 0.7 重合 → +0.7 分
+            }
+
+            // === 原有关键词匹配（保持不变）===
             int matchedKeywords = 0;
             for (String keyword : keywords) {
                 if (questionKeywords.contains(keyword)) {
                     matchedKeywords++;
                 }
             }
-
             if (!keywords.isEmpty()) {
                 float keywordScore = (float) matchedKeywords / keywords.size();
                 score += keywordScore * 0.8f;
             }
 
-            // 3. 优先级加成：每级 +0.05 分（例如 priority=10 → +0.5 分）
+            // === 优先级加成 ===
             score += priority * 0.05f;
 
-            // 4. 长度惩罚：极短问题匹配长答案可能不合理，打 5 折
+            // === 长度惩罚 ===
             if (question.length() < 3 && answer.length() > 100) {
                 score *= 0.5f;
             }
 
-            // 限制总分不超过 2.0（防止过拟合）
             return Math.min(score, 2.0f);
         }
 
@@ -152,7 +170,10 @@ public class KeywordKnowledgeService { // ✅ 修正1: 类名应为 KeywordKnowl
                 for (String word : words) {
                     word = word.trim().toLowerCase();
                     // 长度 >1 且不是停用词才保留
-                    if (word.length() > 1 && !isStopWord(word)) {
+//                    if (word.length() > 1 && !isStopWord(word)) {
+//                        keywords.add(word);
+//                    }
+                    if (!isStopWord(word)) {
                         keywords.add(word);
                     }
                 }
@@ -219,7 +240,7 @@ public class KeywordKnowledgeService { // ✅ 修正1: 类名应为 KeywordKnowl
                         rs.getInt("priority"),
                         rs.getString("category")
                 );
-
+                logger.debug("加载知识条目: " + item);
                 // 加入全量缓存
                 fullCache.add(item);
 
@@ -284,22 +305,11 @@ public class KeywordKnowledgeService { // ✅ 修正1: 类名应为 KeywordKnowl
      * 提取用户问题中的关键词（HanLP + 简单分词）
      */
     private Set<String> extractQuestionKeywords(String question) {
-        Set<String> keywords = new HashSet<>();
+        // 原始关键词
+        Set<String> rawKeywords = extractKeywordsFromText(question, this.stopWords);
 
-        // 方法1：HanLP 提取最多5个关键词
-        List<String> extracted = HanLP.extractKeyword(question, 5);
-        keywords.addAll(extracted);
-
-        // 方法2：按空格/标点简单分词，过滤停用词
-        String[] words = question.split("[\\s\\pP]+");
-        for (String word : words) {
-            word = word.trim().toLowerCase();
-            if (word.length() > 1 && !stopWords.contains(word)) {
-                keywords.add(word);
-            }
-        }
-
-        return keywords;
+        // 扩展同义词
+        return expandKeywordsWithSynonyms(rawKeywords);
     }
 
     /**
@@ -579,6 +589,72 @@ public class KeywordKnowledgeService { // ✅ 修正1: 类名应为 KeywordKnowl
                     ", matchedKeywords=" + matchedKeywords +
                     '}';
         }
+    }
+    /**
+     * 静态工具方法：从文本中提取关键词（供 KnowledgeItem 和外部使用）
+     */
+    private static Set<String> extractKeywordsFromText(String text, Set<String> stopWords) {
+        Set<String> keywords = new HashSet<>();
+
+        if (text == null || text.trim().isEmpty()) {
+            return keywords;
+        }
+
+        // 1. HanLP 提取关键词（最多10个）
+        try {
+            List<String> hanlpKeywords = HanLP.extractKeyword(text, 10);
+            keywords.addAll(hanlpKeywords);
+        } catch (Exception e) {
+            logger.warn("HanLP 关键词提取失败，回退到简单分词: " + e.getMessage());
+        }
+
+        // 2. 简单分词补充（按空格/标点分割）
+        String[] words = text.split("[\\s\\p{Punct}]+"); // \p{Punct} 是标准 Unicode 标点
+        for (String word : words) {
+            word = word.trim().toLowerCase();
+            if (word.isEmpty()) continue;
+
+            // 允许单字疑问词（如“谁”、“吗”）在特定上下文中保留
+            if (isImportantSingleCharWord(word)) {
+                keywords.add(word);
+            } else if (!stopWords.contains(word)) {
+                keywords.add(word);
+            }
+        }
+
+        return keywords;
+    }
+
+    /**
+     * 判断是否为重要的单字疑问词（即使它是停用词也保留）
+     */
+    private static boolean isImportantSingleCharWord(String word) {
+        return word.length() == 1 && ("谁".equals(word) || "啥".equals(word) ||
+                "吗".equals(word) || "呢".equals(word) || "何".equals(word));
+    }
+    // 同义词映射表（可扩展）
+    private static final Map<String, Set<String>> SYNONYMS = new HashMap<>();
+    static {
+        // 朋友相关
+        SYNONYMS.put("朋友", Set.of("朋友", "好友", "哥们", "兄弟", "闺蜜", "伙伴", "best friend", "buddy", "pal"));
+        SYNONYMS.put("最好", Set.of("最好", "最棒", "最铁", "最亲", "最要好", "best", "closest"));
+        SYNONYMS.put("你", Set.of("你", "您", "your", "you"));
+        SYNONYMS.put("是", Set.of("是", "算", "属于", "算是"));
+
+        // 可继续添加...
+    }
+    /**
+     * 基于同义词表扩展关键词集合
+     */
+    private Set<String> expandKeywordsWithSynonyms(Set<String> originalKeywords) {
+        Set<String> expanded = new HashSet<>(originalKeywords);
+        for (String kw : originalKeywords) {
+            Set<String> syns = SYNONYMS.get(kw);
+            if (syns != null) {
+                expanded.addAll(syns);
+            }
+        }
+        return expanded;
     }
 
 }

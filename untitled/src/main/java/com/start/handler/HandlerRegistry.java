@@ -14,8 +14,13 @@ public class HandlerRegistry {
 
     static {
         // 注册所有 Handler（顺序很重要！先匹配的先生效）
-//
+        handlers.add(new HelloHandler());
+        handlers.add(new LuckHandler());
+        handlers.add(new JokeHandler());
 
+        handlers.add(new SanjiaoHandler());
+        handlers.add(new DailyProfessionHandler());
+        handlers.add(new DailyCpHandler());
         // 后续新增功能，只需在这里 add(new XxxHandler())
         handlers.add(new AIHandler());
     }

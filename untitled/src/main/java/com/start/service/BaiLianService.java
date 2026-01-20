@@ -3,8 +3,10 @@ package com.start.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.start.config.BotConfig;
+import com.start.service.K
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -243,7 +245,7 @@ public class BaiLianService {
             // 提取 choices 数组（通常只取第一个）
             JsonNode choices = root.path("output").path("choices");
             if (!choices.isArray() || choices.isEmpty()) {
-                logger.warn("百炼 API 返回结果中缺少 choices");
+                logger.warn("百炼 API 返回结果中缺少 choices，响应: {}", response.body());
                 throw new RuntimeException("AI 未返回有效回复");
             }
 
@@ -357,21 +359,27 @@ public class BaiLianService {
 
     // ===== 主动插话逻辑 =====
 
-    public Optional<Reaction> shouldReactToGroupMessage(String groupId, String userId, String nickname, String message) {
+    public Optional<Reaction> shouldReactToGroupMessage(String groupId, String userId, String nickname, String message,List<Long> ats) {
         if (userId.equals(String.valueOf(BOT_QQ))) return Optional.empty();
 
         long now = System.currentTimeMillis();
         String fullUserId = groupId + "_" + userId;
-
+        Long botQQ =356289140L;
         // ✅ 优先处理追问（不受安静性格影响）
+        logger.debug(" candyBear: 尝试处理主动回复，用户 {}，群 {}，消息：{}，At：{}", userId, groupId, message, ats);
         UserThread thread = userThreads.get(fullUserId);
-        if (thread != null && now - thread.lastInteraction < 120_000) { // 2分钟内
-            if (isFollowUpMessage(message)) {
-                if (canReact(groupId)) {
-                    recordReaction(groupId);
-                    String prompt = "你之前说：“" + thread.lastBotReply + "”\n对方现在说：“" + message + "”\n请用一句自然的话回应。";
-                    logger.debug(" candyBear: 触发追问，用户 {}，群 {}，消息：{}", userId, groupId, message);
-                    return Optional.of(Reaction.withAI(prompt));
+        logger.debug(" 正在检查是否在追问处理时间内");
+        if (thread != null && now - thread.lastInteraction < 120_000) {
+            logger.debug("检查完毕，处于追问时间内");// 2分钟内
+            logger.debug(" candyBear: 触发追问，用户 {}，群 {}，消息：{}", userId, groupId, message);
+            if(ats == null || ats.isEmpty()  || ats.contains(botQQ)) {
+                if (isFollowUpMessage(message)) {
+                    if (canReact(groupId)) {
+                        recordReaction(groupId);
+                        String prompt = "你之前说：“" + thread.lastBotReply + "”\n对方现在说：“" + message + "”\n请用一句自然的话回应。";
+                        logger.debug(" candyBear: 触发追问，用户 {}，群 {}，消息：{}", userId, groupId, message);
+                        return Optional.of(Reaction.withAI(prompt));
+                    }
                 }
             }
         }
@@ -465,6 +473,9 @@ public class BaiLianService {
     }
 
     // ===== 辅助判断 =====
+
+    private boolean isFollowUpMessage(String msg) {
+
 
     private boolean isFollowUpMessage(String msg) {
         if (msg == null || msg.trim().isEmpty()) {

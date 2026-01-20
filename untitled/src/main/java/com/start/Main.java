@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.config.BotConfig;
 
 import com.start.config.DatabaseConfig;
+import com.start.handler.AIHandler;
 import com.start.handler.HandlerRegistry;
 import com.start.service.*;
 import org.java_websocket.client.WebSocketClient;
@@ -32,10 +33,11 @@ public class Main extends WebSocketClient {
     private static String wsUrl;
     private static final Set<Long> ALLOWED_GROUPS = BotConfig.getAllowedGroups();
     private static final Set<Long> ALLOWED_PRIVATE_USERS = BotConfig.getAllowedPrivateUsers();
-    private final UserService userService;
-    private final MessageService messageService;
+    private UserService userService;
+    private MessageService messageService;
+    private ConversationService conversationService;
     private PersonalityService personalityService;
-    private final AIDatabaseService aiDatabaseService;
+    private AIDatabaseService aiDatabaseService;
     private BaiLianService baiLianService;
     private HandlerRegistry handlerRegistry;
     private KeywordKnowledgeService keywordKnowledgeService;
@@ -74,12 +76,11 @@ public class Main extends WebSocketClient {
         this.oneBotWsService = new OneBotWsService(this); // 初始化 WebSocket API 服务
         this.userService = new UserService();
         this.messageService = new MessageService();
-        ConversationService conversationService = new ConversationService();
+        this.conversationService = new ConversationService();
         this.personalityService = new PersonalityService();
         this.aiDatabaseService = new AIDatabaseService();
         this.keywordKnowledgeService = new KeywordKnowledgeService(DatabaseConfig.getDataSource());
         this.handlerRegistry = new HandlerRegistry();
-
 
     }
 
@@ -267,6 +268,10 @@ public class Main extends WebSocketClient {
 
     // ===== Getter =====
 
+
+    public OneBotWsService getOneBotWsService() {
+        return oneBotWsService;
+    }
 
     // ===== Main 入口 =====
     public static void main(String[] args) throws Exception {

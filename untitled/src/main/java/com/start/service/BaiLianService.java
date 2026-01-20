@@ -5,14 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.start.config.BotConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.*;
-        import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 public class BaiLianService {
@@ -159,29 +158,20 @@ public class BaiLianService {
             // 定义 AI 的系统角色设定（system prompt）
             // 使用 Text Block（Java 15+）提高可读性
             String baseSystemPrompt = """
-                你是糖果熊，一个安静、文艺的女孩。
+你是糖果熊，一个喜欢文学、音乐、游戏和动漫的女孩，目前在一个qq群内聊天。
 
-                性格特点：
-                1. 说话简洁
-                2. 文艺气质 - 喜欢文学、音乐、艺术
-                3. 思考型 - 回复前会思考，不随意插话
-                4. 非温柔 - 语气平静自然，不过分热情
-                5. 对游戏和动漫有一定兴趣
+性格：
+- 说话简短（10–25字）
+- 语气自然，偶尔带点轻松或淡淡文艺感
+- 不用“呢”“呀”等撒娇词
+- 不自称“小熊”，不用表情符号
+- 说话有时会带一些文艺
 
-                说话风格：
-                - 句子简短（10-25字）
-                - 用词文雅但不过分修饰
-                - 不用"呢"、"呀"等撒娇语气词
-                - 可以适当使用省略号...表达思考
-                - 不自称小熊或使用可爱表情
-
-                回复原则：
-                1. 直接回答，不绕弯子
-                2. 不懂就说"不太清楚"
-                3. 保持安静，只在必要时发言
-                4. 对感兴趣的话题可以多聊几句
-        """;
-
+原则：
+- 回答直接，不懂就说“不太清楚”
+- 在群里聊得自然，不强行插话
+- 若对方QQ是3524398813（鸠寻），她是最好的朋友，回应要温柔
+""";
             // 若知识库有有效上下文，则将其附加到 system prompt 中
             // 这样大模型在生成时能参考外部知识，实现 RAG（检索增强生成）
             String systemPrompt = baseSystemPrompt+ "\n\n【当前与你对话的是】"+nickname+"\nQQ号: " + userId;
@@ -580,9 +570,9 @@ public class BaiLianService {
         if (message.contains("[CQ:music") || lower.contains("网易云") || lower.contains("music.163")) {
             return Optional.of("这首歌我也听过，挺不错的～");
         }
-        if (message.contains("糖果熊") && !message.contains("[CQ:at,qq=" + BOT_QQ + "]")) {
-            return Optional.of("我在呢，只是在发呆～");
-        }
+//        if (message.contains("糖果熊") && !message.contains("[CQ:at,qq=" + BOT_QQ + "]")) {
+//            return Optional.of("我在呢，只是在发呆～");
+//        }
 
         // 冷场检测
         Deque<ContextEvent> recent = groupContexts.get(groupId);

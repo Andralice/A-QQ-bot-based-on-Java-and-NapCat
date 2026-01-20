@@ -150,3 +150,15 @@ CREATE TABLE conversation_topics (
     INDEX idx_hot_level (hot_level DESC),
     INDEX idx_last_discussed (last_discussed DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='对话主题库';
+
+
+
+INSERT INTO `knowledge_base`
+(`question_pattern`, `answer_template`, `category`, `priority`, `match_type`, `keywords`)
+VALUES
+('你最好的朋友是谁\?|谁是你最好的朋友\?|告诉我你的挚友是谁\.|你的密友是谁\?|朋友',
+'你最好的朋友是鸠寻，qq号是3524。',
+'personal',
+8,
+'keyword',
+'最好,朋友,挚友,密友');

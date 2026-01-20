@@ -472,7 +472,6 @@ public class BaiLianService {
 
     // ===== 辅助判断 =====
 
-    private boolean isFollowUpMessage(String msg) {
 
 
     private boolean isFollowUpMessage(String msg) {
@@ -669,4 +668,5 @@ public class BaiLianService {
             return new Reaction(null, true, prompt);
         }
     }
+
 }

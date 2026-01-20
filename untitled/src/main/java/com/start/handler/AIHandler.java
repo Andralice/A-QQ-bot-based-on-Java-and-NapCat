@@ -47,6 +47,7 @@ public class AIHandler implements MessageHandler {
         String messageType = msg.path("message_type").asText();
         long groupId = msg.path("group_id").asLong();
         List<Long> ats = extractAts(msg);
+        String nickname = msg.path("sender").path("nickname").asText();
         if (userId == selfId) return;
 
         String plainText = MessageUtil.extractPlainText(msg.path("message")).trim();
@@ -58,7 +59,7 @@ public class AIHandler implements MessageHandler {
 
         // 私聊
         if ("private".equals(messageType)) {
-            handlePrivateMessage(bot, msg, userId, rawMessage, plainText);
+            handlePrivateMessage(bot, msg, userId, rawMessage, plainText,nickname);
             return;
         }
 
@@ -67,7 +68,7 @@ public class AIHandler implements MessageHandler {
 
         // 明确触发（#ai / !ai / @）
         if (isExplicitTrigger(msg, rawMessage)) {
-            handleExplicitAIRequest(bot, msg, userId, groupId, rawMessage, plainText);
+            handleExplicitAIRequest(bot, msg, userId, groupId, rawMessage, plainText,nickname);
             return;
         }
 
@@ -85,7 +86,7 @@ public class AIHandler implements MessageHandler {
             if (r.needsAI) {
                 // 异步调用 generate
                 new Thread(() -> {
-                    String reply = aiService.generate("group_" + groupId + "_" + userId, String.valueOf(userId), r.prompt, String.valueOf(groupId));
+                    String reply = aiService.generate("group_" + groupId + "_" + userId, String.valueOf(userId), r.prompt, String.valueOf(groupId),String.valueOf(nickname));
                     if (!reply.trim().isEmpty() && !reply.equals("抱歉，刚才走神了...") && !reply.equals("嗯...")) {
                         sendSplitGroupReplies(bot, groupId, reply);
                         aiService.recordUserInteraction(String.valueOf(groupId), String.valueOf(userId), reply);
@@ -98,7 +99,7 @@ public class AIHandler implements MessageHandler {
         }
     }
 
-    private void handlePrivateMessage(Main bot, JsonNode msg, long userId, String rawMessage, String plainText) {
+    private void handlePrivateMessage(Main bot, JsonNode msg, long userId, String rawMessage, String plainText,String nickname) {
         String prompt = extractPrompt(rawMessage, plainText);
         String sessionId = "private_" + userId;
 
@@ -113,10 +114,10 @@ public class AIHandler implements MessageHandler {
             return;
         }
 
-        replyWithAI(bot, msg, sessionId, String.valueOf(userId), prompt, null);
+        replyWithAI(bot, msg, sessionId, String.valueOf(userId), prompt, null,nickname);
     }
 
-    private void handleExplicitAIRequest(Main bot, JsonNode msg, long userId, long groupId, String rawMessage, String plainText) {
+    private void handleExplicitAIRequest(Main bot, JsonNode msg, long userId, long groupId, String rawMessage, String plainText,String nickname) {
         String prompt = extractPrompt(rawMessage, plainText);
         String sessionId = "group_" + groupId + "_" + userId;
 
@@ -131,7 +132,7 @@ public class AIHandler implements MessageHandler {
             return;
         }
 
-        replyWithAI(bot, msg, sessionId, String.valueOf(userId), prompt, String.valueOf(groupId));
+        replyWithAI(bot, msg, sessionId, String.valueOf(userId), prompt, String.valueOf(groupId),String.valueOf(nickname));
     }
 
     private boolean isExplicitTrigger(JsonNode msg, String rawMessage) {
@@ -152,13 +153,13 @@ public class AIHandler implements MessageHandler {
         return "#clear".equals(prompt) || "!clear".equals(prompt) || "！clear".equals(prompt);
     }
 
-    private void replyWithAI(Main bot, JsonNode originalMsg, String sessionId, String userId, String prompt, String groupId) {
+    private void replyWithAI(Main bot, JsonNode originalMsg, String sessionId, String userId, String prompt, String groupId,String nickname) {
         new Thread(() -> {
             // 发送“思考中”提示
 //            bot.sendReply(originalMsg, "🤔 稍等...");
 
             // 调用 AI（内部已做频率限制）
-            String reply = aiService.generate(sessionId, userId, prompt, groupId);
+            String reply = aiService.generate(sessionId, userId, prompt, groupId,nickname);
 
             if (reply == null || reply.trim().isEmpty()) {
                 // 被频率限制或出错，不发后续

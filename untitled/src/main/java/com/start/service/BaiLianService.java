@@ -3,10 +3,8 @@ package com.start.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.start.config.BotConfig;
-import com.start.service.K
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;

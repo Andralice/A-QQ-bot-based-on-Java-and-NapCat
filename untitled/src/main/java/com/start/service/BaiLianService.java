@@ -2,6 +2,9 @@ package com.start.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.start.agent.Tool;
 import com.start.config.BotConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +16,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.stream.Collectors;
 
 public class BaiLianService {
     public static void setKnowledgeService(KeywordKnowledgeService service) {
@@ -48,6 +52,8 @@ public class BaiLianService {
     // === 对话线程追踪 ===
     private final Map<String, UserThread> userThreads = new ConcurrentHashMap<>(); // "groupId_userId" -> 线程
     private final Map<String, Deque<ContextEvent>> groupContexts = new ConcurrentHashMap<>(); // groupId -> 事件队列
+
+
 
     // 内部类
     private static class UserThread {
@@ -304,6 +310,188 @@ public class BaiLianService {
         }
     }
 
+    public String generateForAgent(String userPrompt, List<Tool> tools) {
+        logger.info("🤖 Agent AI 调用: prompt=[{}]", userPrompt);
+
+        try {
+            // 构建 messages：纯任务导向
+            List<Map<String, String>> messages = new ArrayList<>();
+
+            // ⭐ 关键：Agent 的 system prompt（中立、指令明确）
+            String systemPrompt = """
+你是一个高效、准确的智能助手，专注于回答用户的问题或执行指定任务。
+- 回答应简洁、事实准确
+- 若调用了工具，请基于工具结果直接作答
+- 不要添加无关语气词、拟人化表达或文艺修饰
+- 如果不知道答案，直接说“无法提供相关信息”
+""";
+            messages.add(Map.of("role", "system", "content", systemPrompt));
+            messages.add(Map.of("role", "user", "content", userPrompt));
+
+            // 调用百炼 API（支持 function calling）
+            String url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation";
+            String apiKey = "sk-86b180d2f5254cb9b7c37af1f442baaf"; // ← 后续应抽到配置
+
+            // 构造 tools 数组（用于 function calling）
+            List<Map<String, Object>> toolSpecs = tools.stream()
+                    .map(Tool::getFunctionSpec)
+                    .collect(Collectors.toList());
+
+            Map<String, Object> input = new HashMap<>();
+            input.put("messages", messages);
+            if (!toolSpecs.isEmpty()) {
+                input.put("tools", toolSpecs);
+            }
+
+            Map<String, Object> requestBodyObj = Map.of(
+                    "model", "qwen3-max",
+                    "input", input,
+                    "parameters", Map.of("result_format", "message")
+            );
+
+            String requestBody = mapper.writeValueAsString(requestBodyObj);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("Agent AI 服务 HTTP 错误: " + response.statusCode());
+            }
+
+            JsonNode root = mapper.readTree(response.body());
+            if (root.has("code") && !"200".equals(root.path("code").asText())) {
+                throw new RuntimeException("Agent AI 业务错误: " + root.path("message").asText());
+            }
+
+            JsonNode choices = root.path("output").path("choices");
+            if (choices.isArray() && !choices.isEmpty()) {
+                JsonNode msg = choices.get(0).path("message");
+                return msg.path("content").asText().trim();
+            }
+            String requestId = root.path("request_id").asText("N/A");
+            logger.debug("📋 百炼 Request ID: {}", requestId);
+
+// 如果是错误，也带上 request_id
+            if (root.has("code") && !"200".equals(root.path("code").asText())) {
+                String errorMsg = root.path("message").asText("未知错误");
+                logger.warn("⚠️ 百炼 API 业务错误 - request_id: {}, code: {}, message: {}",
+                        requestId, root.path("code").asText(), errorMsg);
+                throw new RuntimeException("AI 业务错误: " + errorMsg);
+            }
+
+            throw new RuntimeException("Agent AI 未返回有效内容");
+
+
+        } catch (Exception e) {
+            logger.error("Agent AI 调用失败", e);
+            return "处理请求时出错了，请稍后再试。";
+        }
+    }
+
+    // BaiLianService.java
+
+    public JsonNode generateWithTools(String userPrompt, List<Tool> tools) throws Exception {
+        // 构建消息历史
+        List<Map<String, String>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "system", "content", "你是一个智能助手，能根据需要调用工具解决问题。你必须严格遵守以下规则：\n" +
+                "- 如果问题需要外部信息（如天气、知识库），立即调用对应工具。\n" +
+                "- 不要解释你要做什么，不要输出任何额外文字。\n" +
+                "- 直接通过函数调用获取结果。\n" +
+                "- 工具调用由系统自动处理，你只需决定是否调用。"));
+        messages.add(Map.of("role", "user", "content", userPrompt));
+
+        // 构建工具列表
+        List<Map<String, Object>> toolSpecs = tools.stream()
+                .map(Tool::getFunctionSpec)
+                .collect(Collectors.toList());
+
+        // 构建请求体
+        Map<String, Object> requestBodyObj = Map.of(
+                "model", "qwen-max",
+                "input", Map.of(
+                        "messages", messages
+//                        "tools", toolSpecs.isEmpty() ? null : toolSpecs,
+//                        "tool_choice", "auto"
+                ),
+                "parameters", Map.of("result_format",
+                        "message",
+                        "tools", toolSpecs.isEmpty() ? null : toolSpecs,
+                        "tool_choice", "auto"
+                )
+        );
+
+        String apiKey = "sk-86b180d2f5254cb9b7c37af1f442baaf";
+        String requestBody = mapper.writeValueAsString(requestBodyObj);
+
+        // 【可选】脱敏：隐藏 API Key（生产环境建议）
+        // String safeRequestBody = requestBody.replace(apiKey, "sk-****");
+        // log.debug("➡️ 向百炼 API 发送请求: {}", safeRequestBody);
+        logger.debug("➡️ 向百炼 API 发送请求: {}", requestBody);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"))
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response;
+        try {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (Exception e) {
+            logger.error("❌ 调用百炼 API 时发生异常", e);
+            throw new RuntimeException("AI 服务调用失败: " + e.getMessage(), e);
+        }
+
+        logger.debug("⬅️ 百炼 API 响应状态码: {}, 响应体: {}", response.statusCode(), response.body());
+
+        // 检查 HTTP 状态码
+        if (response.statusCode() != 200) {
+            logger.warn("⚠️ 百炼 API 返回非200状态码: {}，响应: {}", response.statusCode(), response.body());
+            throw new RuntimeException("AI 服务错误: HTTP " + response.statusCode());
+        }
+
+        // 解析 JSON 响应
+        JsonNode root = mapper.readTree(response.body());
+
+        // ✅ 关键修复：仅当存在 'code' 字段且不为 "200" 时，才视为业务错误
+        if (root.has("code")) {
+            String code = root.path("code").asText();
+            if (!"200".equals(code)) {
+                String errorMsg = root.path("message").asText("未知错误");
+                logger.warn("⚠️ 百炼 API 业务错误 - code: {}, message: {}, full response: {}", code, errorMsg, response.body());
+                throw new RuntimeException("AI 业务错误: " + errorMsg + " (code=" + code + ")");
+            }
+        }
+
+
+        // 正常路径：提取模型返回的消息
+        JsonNode choices = root.path("output").path("choices");
+        if (choices.isEmpty() || !choices.isArray() || choices.size() == 0) {
+            logger.warn("⚠️ 百炼 API 返回空 choices: {}", response.body());
+            throw new RuntimeException("AI 返回结果无效：choices 为空");
+        }
+        String requestId = root.path("request_id").asText("N/A");
+        logger.debug("📋 百炼 Request ID: {}", requestId);
+
+// 如果是错误，也带上 request_id
+        if (root.has("code") && !"200".equals(root.path("code").asText())) {
+            String errorMsg = root.path("message").asText("未知错误");
+            logger.warn("⚠️ 百炼 API 业务错误 - request_id: {}, code: {}, message: {}",
+                    requestId, root.path("code").asText(), errorMsg);
+            throw new RuntimeException("AI 业务错误: " + errorMsg);
+        }
+
+        return choices.get(0).path("message");
+    }
+
+
+
     // ===== 工具方法：将长回复拆成多条短消息（≤25字）=====
     public List<String> splitIntoShortMessages(String reply) {
         if (reply == null || reply.trim().isEmpty()) {
@@ -357,21 +545,27 @@ public class BaiLianService {
 
     // ===== 主动插话逻辑 =====
 
-    public Optional<Reaction> shouldReactToGroupMessage(String groupId, String userId, String nickname, String message) {
+    public Optional<Reaction> shouldReactToGroupMessage(String groupId, String userId, String nickname, String message, List<Long> ats) {
         if (userId.equals(String.valueOf(BOT_QQ))) return Optional.empty();
 
         long now = System.currentTimeMillis();
         String fullUserId = groupId + "_" + userId;
-
+        Long botQQ =356289140L;
         // ✅ 优先处理追问（不受安静性格影响）
+        logger.debug(" candyBear: 尝试处理主动回复，用户 {}，群 {}，消息：{}，At：{}", userId, groupId, message, ats);
         UserThread thread = userThreads.get(fullUserId);
-        if (thread != null && now - thread.lastInteraction < 120_000) { // 2分钟内
-            if (isFollowUpMessage(message)) {
-                if (canReact(groupId)) {
-                    recordReaction(groupId);
-                    String prompt = "你之前说：“" + thread.lastBotReply + "”\n对方现在说：“" + message + "”\n请用一句自然的话回应。";
-                    logger.debug(" candyBear: 触发追问，用户 {}，群 {}，消息：{}", userId, groupId, message);
-                    return Optional.of(Reaction.withAI(prompt));
+        logger.debug(" 正在检查是否在追问处理时间内");
+        if (thread != null && now - thread.lastInteraction < 120_000) {
+            logger.debug("检查完毕，处于追问时间内");// 2分钟内
+            logger.debug(" candyBear: 触发追问，用户 {}，群 {}，消息：{}", userId, groupId, message);
+            if(ats == null || ats.isEmpty()  || ats.contains(botQQ)) {
+                if (isFollowUpMessage(message)) {
+                    if (canReact(groupId)) {
+                        recordReaction(groupId);
+                        String prompt = "你之前说：“" + thread.lastBotReply + "”\n对方现在说：“" + message + "”\n请用一句自然的话回应。";
+                        logger.debug(" candyBear: 触发追问，用户 {}，群 {}，消息：{}", userId, groupId, message);
+                        return Optional.of(Reaction.withAI(prompt));
+                    }
                 }
             }
         }

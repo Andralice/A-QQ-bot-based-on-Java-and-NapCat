@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.config.BotConfig;
 
 import com.start.config.DatabaseConfig;
+import com.start.handler.AgentHandler;
 import com.start.handler.HandlerRegistry;
 import com.start.service.*;
 import org.java_websocket.client.WebSocketClient;
@@ -36,12 +37,12 @@ public class Main extends WebSocketClient {
     private final MessageService messageService;
     private PersonalityService personalityService;
     private final AIDatabaseService aiDatabaseService;
-    private BaiLianService baiLianService;
+    private static BaiLianService baiLianService;
     private HandlerRegistry handlerRegistry;
-    private KeywordKnowledgeService keywordKnowledgeService;
+    private static KeywordKnowledgeService keywordKnowledgeService;
     // ===== 新增：用于处理 WebSocket API 响应 =====
     private final Map<String, CompletableFuture<JsonNode>> pendingRequests = new ConcurrentHashMap<>();
-
+    public static AgentService agentService = new AgentService(baiLianService,keywordKnowledgeService); // 依赖注入
     // ===== 服务实例 =====
     private SpamDetector spamDetector;
 
@@ -79,7 +80,8 @@ public class Main extends WebSocketClient {
         this.aiDatabaseService = new AIDatabaseService();
         this.keywordKnowledgeService = new KeywordKnowledgeService(DatabaseConfig.getDataSource());
         this.handlerRegistry = new HandlerRegistry();
-
+        this.baiLianService = new BaiLianService();
+        this.agentService = new AgentService(this.baiLianService, this.keywordKnowledgeService);
 
     }
 
@@ -88,6 +90,9 @@ public class Main extends WebSocketClient {
         logger.info("🛡️ SpamDetector 初始化完成");
         BaiLianService.setKnowledgeService(this.keywordKnowledgeService);
         logger.info("🧠 BaiLianService 已绑定 KeywordKnowledgeService");
+        AgentService agentService = new AgentService(this.baiLianService, this.keywordKnowledgeService);
+
+        logger.info("🤖 Agent 已启用");
     }
 
     @Override

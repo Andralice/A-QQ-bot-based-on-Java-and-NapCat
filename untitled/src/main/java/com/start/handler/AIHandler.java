@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Random;
 
+import static com.start.util.MessageUtil.extractAts;
+
 public class AIHandler implements MessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(AIHandler.class);
@@ -44,6 +46,7 @@ public class AIHandler implements MessageHandler {
         long userId = msg.path("user_id").asLong();
         String messageType = msg.path("message_type").asText();
         long groupId = msg.path("group_id").asLong();
+        List<Long> ats = extractAts(msg);
         String nickname = msg.path("sender").path("nickname").asText();
         if (userId == selfId) return;
 
@@ -74,7 +77,8 @@ public class AIHandler implements MessageHandler {
                 String.valueOf(groupId),
                 String.valueOf(userId),
                 senderNick,
-                plainText
+                plainText,
+                ats
         );
 
         if (reaction.isPresent()) {

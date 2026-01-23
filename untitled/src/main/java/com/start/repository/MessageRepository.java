@@ -2,11 +2,12 @@
 // repository/MessageRepository.java
 package com.start.repository;
 
+import com.start.config.DatabaseConfig;
 import com.start.model.ChatMessage;
 import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.*;
-
+import static com.start.config.DatabaseConfig.getConnection;
 public class MessageRepository extends BaseRepository {
 
     /**
@@ -142,7 +143,59 @@ public class MessageRepository extends BaseRepository {
             return DatabaseResult.failure(result.getError());
         }
     }
+    /**
+     * 获取指定用户在指定上下文（群或私聊）中，ID 大于 lastMessageId 的消息（最多 limit 条）
+     * 用于增量更新用户画像和好感度
+     */
+    /**
+     * 获取指定用户在指定上下文（群或私聊）中，ID 大于 lastMessageId 的消息（最多 limit 条）
+     */
+    public DatabaseResult<List<ChatMessage>> findMessagesAfterId(String userId, String groupId, long lastMessageId, int limit) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT * FROM messages WHERE user_id = ? AND is_robot_reply = FALSE AND id > ? ");
 
+        if (groupId == null) {
+            sql.append("AND group_id IS NULL ");
+        } else {
+            sql.append("AND group_id = ? ");
+        }
+
+        sql.append("ORDER BY id ASC LIMIT ?");
+
+        return safeExecute(() -> {
+            Connection conn = null;
+            PreparedStatement pstmt = null;
+            ResultSet rs = null;
+
+            try {
+                conn = DatabaseConfig.getConnection();
+                pstmt = conn.prepareStatement(sql.toString());
+
+                pstmt.setString(1, userId);
+                pstmt.setLong(2, lastMessageId);
+
+                if (groupId != null) {
+                    pstmt.setString(3, groupId);
+                    pstmt.setInt(4, limit);
+                } else {
+                    pstmt.setInt(3, limit);
+                }
+
+                rs = pstmt.executeQuery();
+                List<ChatMessage> messages = new ArrayList<>();
+                while (rs.next()) {
+                    ChatMessage msg = mapToChatMessage(rs);
+                    if (msg != null) {
+                        messages.add(msg);
+                    }
+                }
+
+                return messages; // ✅ 返回 List<ChatMessage>，由 safeExecute 包装
+            } finally {
+                closeResources(conn, pstmt, rs);
+            }
+        });
+    }
     /**
      * 统计群组消息数量
      */

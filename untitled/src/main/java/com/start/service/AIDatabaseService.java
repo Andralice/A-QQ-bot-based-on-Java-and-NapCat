@@ -20,7 +20,7 @@ public class AIDatabaseService {
     /**
      * 记录用户消息
      */
-    public void recordUserMessage(String sessionId, String userId, String prompt, String groupId) {
+    public void recordUserMessage(String sessionId, String userId, String prompt, String groupId,Long isagent) {
         try {
             // 1. 更新用户信息
             userRepo.createOrUpdateUser(userId, "未知用户");
@@ -33,6 +33,7 @@ public class AIDatabaseService {
             messageData.put("content", prompt);
             messageData.put("isRobotReply", false);
             messageData.put("isPrivate", groupId == null);
+            messageData.put ("isAgent", isagent);
 
             if (groupId != null) {
                 messageData.put("groupId", groupId);
@@ -219,4 +220,7 @@ public class AIDatabaseService {
         if (message.contains("@糖果熊") || message.contains("@机器人")) confidence += 0.3;
         return Math.min(confidence, 1.0);
     }
+
+
+
 }

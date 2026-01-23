@@ -63,4 +63,118 @@ CREATE TABLE active_reply_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+第二次：
 
+-- 知识库表（全局固定知识）
+CREATE TABLE knowledge_base (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    question_pattern VARCHAR(500) NOT NULL COMMENT '问题模式/关键词',
+    answer TEXT NOT NULL COMMENT '固定回答',
+    category VARCHAR(50) DEFAULT 'general' COMMENT '分类:game/personal/system',
+    priority INT DEFAULT 1 COMMENT '优先级 1-5',
+    match_type VARCHAR(20) DEFAULT 'keyword' COMMENT '匹配类型:keyword/regex/vector',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_pattern (question_pattern(100)),
+    INDEX idx_category (category),
+    INDEX idx_priority (priority)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='固定知识库';
+
+-- 长期记忆表（基于现有messages扩展）
+CREATE TABLE long_term_memories (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL COMMENT '用户QQ',
+    group_id VARCHAR(50) COMMENT '群号',
+    source_message_id BIGINT COMMENT '来源消息ID，关联messages表',
+    content TEXT NOT NULL COMMENT '记忆内容',
+    memory_type VARCHAR(20) DEFAULT 'fact' COMMENT '类型:fact/preference/event/relation',
+    keywords TEXT COMMENT '关键词，逗号分隔',
+    importance INT DEFAULT 1 COMMENT '重要性 1-5',
+    vector_data JSON COMMENT '向量化数据（可选）',
+    last_recalled TIMESTAMP NULL COMMENT '最后被回忆时间',
+    recall_count INT DEFAULT 0 COMMENT '被回忆次数',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE SET NULL,
+    INDEX idx_user_group (user_id, group_id),
+    INDEX idx_memory_type (memory_type),
+    INDEX idx_importance (importance DESC),
+    INDEX idx_keywords (keywords(255)),
+    INDEX idx_last_recalled (last_recalled DESC),
+    INDEX idx_created_at (created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户长期记忆';
+
+-- 用户偏好表（基于现有users表扩展）
+CREATE TABLE user_preferences (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL UNIQUE COMMENT '用户QQ',
+    preferences JSON COMMENT '偏好设置JSON',
+    game_accounts JSON COMMENT '游戏账号信息',
+    personal_facts JSON COMMENT '个人事实信息',
+    tags VARCHAR(500) COMMENT '用户标签',
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    INDEX idx_tags (tags(255))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户偏好信息';
+
+-- 记忆关联表（建立记忆间的联系）
+CREATE TABLE memory_associations (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    memory_id BIGINT NOT NULL COMMENT '记忆ID',
+    related_memory_id BIGINT COMMENT '相关记忆ID',
+    related_message_id BIGINT COMMENT '相关消息ID',
+    association_type VARCHAR(20) DEFAULT 'similar' COMMENT '关联类型:similar/topic/time/user',
+    strength DECIMAL(3,2) DEFAULT 1.0 COMMENT '关联强度 0-1',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (memory_id) REFERENCES long_term_memories(id) ON DELETE CASCADE,
+    FOREIGN KEY (related_memory_id) REFERENCES long_term_memories(id) ON DELETE SET NULL,
+    FOREIGN KEY (related_message_id) REFERENCES messages(id) ON DELETE SET NULL,
+    INDEX idx_memory (memory_id),
+    INDEX idx_related (related_memory_id),
+    INDEX idx_type (association_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='记忆关联关系';
+
+-- 对话主题表（增强topic功能）
+CREATE TABLE conversation_topics (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    topic_name VARCHAR(100) NOT NULL COMMENT '主题名称',
+    description TEXT COMMENT '主题描述',
+    related_keywords TEXT COMMENT '相关关键词',
+    hot_level INT DEFAULT 1 COMMENT '热门程度 1-10',
+    last_discussed TIMESTAMP NULL COMMENT '最后讨论时间',
+    discuss_count INT DEFAULT 0 COMMENT '讨论次数',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_topic_name (topic_name),
+    INDEX idx_hot_level (hot_level DESC),
+    INDEX idx_last_discussed (last_discussed DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='对话主题库';
+
+
+
+INSERT INTO `knowledge_base`
+(`question_pattern`, `answer_template`, `category`, `priority`, `match_type`, `keywords`)
+VALUES
+('你最好的朋友是谁\?|谁是你最好的朋友\?|告诉我你的挚友是谁\.|你的密友是谁\?|朋友',
+'你最好的朋友是鸠寻，qq号是3524。',
+'personal',
+8,
+'keyword',
+'最好,朋友,挚友,密友');
+
+
+
+
+CREATE TABLE `user_profiles` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` varchar(50) NOT NULL COMMENT '用户QQ',
+  `group_id` varchar(50) DEFAULT NULL COMMENT '群号，私聊为NULL',
+  `profile_text` text NOT NULL COMMENT 'AI生成的人格画像文本',
+  `message_count_snapshot` int NOT NULL COMMENT '生成时累计的消息条数（用于判断是否需更新）',
+  `last_message_id` bigint NOT NULL COMMENT '最后一条用于分析的消息ID',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_group` (`user_id`, `group_id`) -- 每个用户在每个群有独立画像
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

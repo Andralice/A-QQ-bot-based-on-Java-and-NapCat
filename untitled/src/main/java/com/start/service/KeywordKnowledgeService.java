@@ -65,6 +65,7 @@ public class KeywordKnowledgeService {
         System.out.println("关键词知识管理器初始化完成，共加载 " + fullCache.size() + " 条知识");
     }
 
+
     /**
      * 知识条目内部类
      */

@@ -14,3 +14,31 @@ My$qlR00t#2026
 DATABASE candybear_db
 
 CREATE USER 'candybear'@'localhost' IDENTIFIED BY 'YourStrongPassword123!';
+
+
+// 在生成 AI 回复前
+String context = "";
+try {
+    UserProfileRepository profileRepo = new UserProfileRepository();
+    UserAffinityRepository affinityRepo = new UserAffinityRepository();
+
+    var profile = profileRepo.findByUserIdAndGroupId(userId, groupId);
+    var affinity = affinityRepo.findByUserIdAndGroupId(userId, groupId);
+
+    if (profile.isPresent()) {
+        context += "\n【用户画像】" + profile.get().getProfileText();
+    }
+    if (affinity.isPresent()) {
+        int score = affinity.get().getAffinityScore();
+        if (score >= 80) {
+            context += "\n【你们关系很好，可以更亲切】";
+        } else if (score <= 30) {
+            context += "\n【对方对你较冷淡，请保持礼貌】";
+        }
+    }
+} catch (Exception e) {
+    e.printStackTrace();
+}
+
+// 把 context 加入 system prompt
+String fullPrompt = basePrompt + context + "\n用户说：" + userMessage;

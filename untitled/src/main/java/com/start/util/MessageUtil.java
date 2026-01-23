@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 public class MessageUtil {
     private static final Logger logger = LoggerFactory.getLogger(MessageUtil.class);
@@ -26,6 +27,37 @@ public class MessageUtil {
             }
         }
         return sb.toString();
+    }
+
+    public static String extractPlainText(String rawMessage) {
+        if (rawMessage == null) {
+            return "";
+        }
+
+        StringBuilder result = new StringBuilder();
+        boolean insideCq = false;
+
+        for (int i = 0; i < rawMessage.length(); i++) {
+            char c = rawMessage.charAt(i);
+
+            if (!insideCq) {
+                // 检查是否遇到 "[CQ:"
+                if (c == '[' && i + 4 <= rawMessage.length()
+                        && rawMessage.startsWith("CQ:", i + 1)) {
+                    insideCq = true; // 进入 CQ 标签，跳过
+                } else {
+                    result.append(c); // 普通字符，保留
+                }
+            } else {
+                // 已经在 CQ 标签内部，寻找 ']'
+                if (c == ']') {
+                    insideCq = false; // 结束标签，继续正常处理
+                }
+                // 否则继续跳过（不 append）
+            }
+        }
+
+        return result.toString();
     }
 
     /**

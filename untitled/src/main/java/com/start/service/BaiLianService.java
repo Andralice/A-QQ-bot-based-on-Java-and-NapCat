@@ -2,7 +2,14 @@ package com.start.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.start.agent.Tool;
+import com.start.agent.UserAffinityTool;
+import com.start.agent.WeatherTool;
 import com.start.config.BotConfig;
+import com.start.repository.UserAffinityRepository;
+import com.start.repository.UserProfileRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.net.URI;
@@ -13,6 +20,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.stream.Collectors;
 
 public class BaiLianService {
     public static void setKnowledgeService(KeywordKnowledgeService service) {
@@ -28,12 +36,13 @@ public class BaiLianService {
     private final BehaviorAnalyzer behaviorAnalyzer = new BehaviorAnalyzer();
     // 复用 ObjectMapper（避免重复创建）
     private static final ObjectMapper mapper = new ObjectMapper();
+    private static final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
 
     // HTTP 客户端
     private static final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-
+    private final ObjectMapper objectMapper = new ObjectMapper();
     // === 上下文管理 ===
     private final Map<String, List<Message>> sessions = new ConcurrentHashMap<>(); // sessionId -> 消息历史
     private final Map<String, Long> lastClearTime = new ConcurrentHashMap<>();
@@ -110,7 +119,77 @@ public class BaiLianService {
     public String generate(String sessionId, String userId, String userPrompt, String groupId,String nickname) {
         // 记录本次 AI 调用日志，便于追踪和调试
         logger.info("🧠 AI 调用: sessionId={}, prompt=[{}]", sessionId, userPrompt);
+        String context = "";
+        String agentToolContext = "";
+        boolean shouldBypassMainModel = false;
+        String directReplyFromAgent = null;
+        final List<Tool> availableTools = Arrays.asList(
+                new WeatherTool(),
+                new UserAffinityTool(userAffinityRepo)
+        );
+        try {
+            // 复用 BaiLianService 的 generateWithTools
+            JsonNode agentResponse = generateWithTools(userPrompt, availableTools, userId, groupId);
 
+            String content = agentResponse.path("content").asText().trim();
+            boolean hasToolCalls = agentResponse.has("tool_calls")
+                    && agentResponse.get("tool_calls").isArray()
+                    && !agentResponse.get("tool_calls").isEmpty();
+
+            if (hasToolCalls) {
+                // 执行工具调用，获取结果，作为上下文
+                JsonNode toolCall = agentResponse.get("tool_calls").get(0);
+                String toolName = toolCall.path("function").path("name").asText();
+                String argsJson = toolCall.path("function").path("arguments").asText();
+
+                Tool tool = availableTools.stream()
+                        .filter(t -> t.getName().equals(toolName))
+                        .findFirst()
+                        .orElse(null);
+
+                if (tool != null) {
+                    Map<String, Object> args = objectMapper.readValue(argsJson, Map.class);
+                    String toolResult = tool.execute(args);
+                    logger.info("🔧 主聊天中 Agent 工具 [{}] 结果: {}", toolName, toolResult);
+                    agentToolContext = "\n\n【工具执行结果】\n" + toolResult;
+                }
+                // 注意：即使有工具结果，也不 bypass 主模型！而是注入上下文
+            } else {
+                // 没有工具调用
+                if (!content.isEmpty()) {
+                    // Agent 直接给出了回答（如追问、拒绝等）
+                    // 这类内容通常不适合再经过糖果熊润色（比如“请提供城市名”）
+                    shouldBypassMainModel = true;
+                    directReplyFromAgent = content;
+                }
+                // 否则：content 为空，无工具调用 → 继续走主模型
+            }
+        } catch (Exception e) {
+            logger.warn("Agent 预处理失败，降级到主聊天", e);
+            // 不中断，继续走主模型
+        }
+        try {
+            UserProfileRepository profileRepo = new UserProfileRepository();
+            UserAffinityRepository affinityRepo = new UserAffinityRepository();
+
+            var profile = profileRepo.findByUserIdAndGroupId(userId, groupId);
+            var affinity = affinityRepo.findByUserIdAndGroupId(userId, groupId);
+
+            if (profile.isPresent()) {
+                context += "\n【用户画像】" + profile.get().getProfileText();
+            }
+            if (affinity.isPresent()) {
+                int score = affinity.get().getAffinityScore();
+                context+="\n你们的好感度是"+ score+",每人的基础好感度是50";
+//                if (score >= 80) {
+//                    context += "\n【你们关系很好，可以更亲切】";
+//                } else if (score <= 30) {
+//                    context += "\n【对方对你较冷淡，请保持礼貌】";
+//                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
         // ====== 第1步：查询知识库（仅用于增强上下文，不直接返回） ======
         // 调用知识库服务，根据用户提问、用户ID和群组ID进行语义检索
         KeywordKnowledgeService.KnowledgeResult knowledgeResult =
@@ -139,7 +218,8 @@ public class BaiLianService {
         // ====== 第2步：走百炼AI流程（始终调用） ======
         try {
             // 将用户消息持久化到数据库（用于审计、回溯等）
-            aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId);
+            Long isagent = 1L;
+            aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId,isagent);
 
             // 从 sessions 缓存中获取或初始化当前会话的历史消息列表
             // sessions 是一个 ConcurrentHashMap<String, List<Message>>，用于短期内存缓存对话历史
@@ -174,9 +254,12 @@ public class BaiLianService {
 """;
             // 若知识库有有效上下文，则将其附加到 system prompt 中
             // 这样大模型在生成时能参考外部知识，实现 RAG（检索增强生成）
-            String systemPrompt = baseSystemPrompt+ "\n\n【当前与你对话的是】"+nickname+"\nQQ号: " + userId;
+            String systemPrompt = baseSystemPrompt+ "\n\n【当前与你对话的是】"+nickname+"\n【QQ号:】" + userId+"这是你对该用户信息："+context+"你可以根据用户画像和好感度高低进行不同的会话风格";
             if (!knowledgeContext.isEmpty()) {
                 systemPrompt += "\n\n【参考信息】\n" + knowledgeContext;
+            }
+            if (!agentToolContext.isEmpty()) {
+                systemPrompt += agentToolContext;
             }
 
             // 构建发送给百炼 API 的 messages 数组
@@ -304,6 +387,198 @@ public class BaiLianService {
         }
     }
 
+    public String generateForAgent(String userPrompt, List<Tool> tools) {
+        logger.info("🤖 Agent AI 调用: prompt=[{}]", userPrompt);
+
+        try {
+            // 构建 messages：纯任务导向
+            List<Map<String, String>> messages = new ArrayList<>();
+
+            // ⭐ 关键：Agent 的 system prompt（中立、指令明确）
+            String systemPrompt = """
+            你是一个高效、准确的智能助手，专注于回答用户的问题或执行指定任务。
+            - 回答应简洁、事实准确
+            - 若调用了工具，请基于工具结果直接作答
+            - 不要添加无关语气词、拟人化表达或文艺修饰
+            - 如果不知道答案，直接说“无法提供相关信息”
+            """;
+            messages.add(Map.of("role", "system", "content", systemPrompt));
+            messages.add(Map.of("role", "user", "content", userPrompt));
+
+            // 调用百炼 API（支持 function calling）
+            String url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation";
+            String apiKey = "sk-86b180d2f5254cb9b7c37af1f442baaf"; // ← 后续应抽到配置
+
+            // 构造 tools 数组（用于 function calling）
+            List<Map<String, Object>> toolSpecs = tools.stream()
+                    .map(Tool::getFunctionSpec)
+                    .collect(Collectors.toList());
+
+            Map<String, Object> input = new HashMap<>();
+            input.put("messages", messages);
+            if (!toolSpecs.isEmpty()) {
+                input.put("tools", toolSpecs);
+            }
+
+            Map<String, Object> requestBodyObj = Map.of(
+                    "model", "qwen3-max",
+                    "input", input,
+                    "parameters", Map.of("result_format", "message")
+            );
+
+            String requestBody = mapper.writeValueAsString(requestBodyObj);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("Agent AI 服务 HTTP 错误: " + response.statusCode());
+            }
+
+            JsonNode root = mapper.readTree(response.body());
+            if (root.has("code") && !"200".equals(root.path("code").asText())) {
+                throw new RuntimeException("Agent AI 业务错误: " + root.path("message").asText());
+            }
+
+            JsonNode choices = root.path("output").path("choices");
+            if (choices.isArray() && !choices.isEmpty()) {
+                JsonNode msg = choices.get(0).path("message");
+                return msg.path("content").asText().trim();
+            }
+            String requestId = root.path("request_id").asText("N/A");
+            logger.debug("📋 百炼 Request ID: {}", requestId);
+
+// 如果是错误，也带上 request_id
+            if (root.has("code") && !"200".equals(root.path("code").asText())) {
+                String errorMsg = root.path("message").asText("未知错误");
+                logger.warn("⚠️ 百炼 API 业务错误 - request_id: {}, code: {}, message: {}",
+                        requestId, root.path("code").asText(), errorMsg);
+                throw new RuntimeException("AI 业务错误: " + errorMsg);
+            }
+
+            throw new RuntimeException("Agent AI 未返回有效内容");
+
+
+        } catch (Exception e) {
+            logger.error("Agent AI 调用失败", e);
+            return "处理请求时出错了，请稍后再试。";
+        }
+    }
+
+    // BaiLianService.java
+
+    public JsonNode generateWithTools(String userPrompt, List<Tool> tools, String userId, String groupId) throws Exception {
+        String contextInfo;
+        if (groupId != null) {
+            contextInfo = "[群聊] 群ID: " + groupId + " | 用户ID: " + userId;
+        } else {
+            contextInfo = "[私聊] 用户ID: " + userId;
+        }
+        String enrichedPrompt = contextInfo + "\n\n用户消息: " + userPrompt;
+        Long isagent= 1L;
+        String sessionId = "group_" + groupId + "_" + userId;
+        aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId,isagent);
+        // 构建消息历史
+        List<Map<String, String>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "system", "content", "你是一个智能助手，能根据需要调用工具解决问题。你必须严格遵守以下规则：\n" +
+                "- 如果问题需要外部信息（如天气、知识库），立即调用对应工具。\n" +
+                "- 不要解释你要做什么，不要输出任何额外文字。\n" +
+                "- 直接通过函数调用获取结果。\n" +
+                "- 工具调用由系统自动处理，你只需决定是否调用。"));
+        messages.add(Map.of("role", "user", "content", enrichedPrompt));
+
+        // 构建工具列表
+        List<Map<String, Object>> toolSpecs = tools.stream()
+                .map(Tool::getFunctionSpec)
+                .collect(Collectors.toList());
+
+        // 构建请求体
+        Map<String, Object> requestBodyObj = Map.of(
+                "model", "qwen-max",
+                "input", Map.of(
+                        "messages", messages
+//                        "tools", toolSpecs.isEmpty() ? null : toolSpecs,
+//                        "tool_choice", "auto"
+                ),
+                "parameters", Map.of("result_format",
+                        "message",
+                        "tools", toolSpecs.isEmpty() ? null : toolSpecs,
+                        "tool_choice", "auto"
+                )
+        );
+
+        String apiKey = "sk-86b180d2f5254cb9b7c37af1f442baaf";
+        String requestBody = mapper.writeValueAsString(requestBodyObj);
+
+        // 【可选】脱敏：隐藏 API Key（生产环境建议）
+        // String safeRequestBody = requestBody.replace(apiKey, "sk-****");
+        // log.debug("➡️ 向百炼 API 发送请求: {}", safeRequestBody);
+        logger.debug("➡️ 向百炼 API 发送请求: {}", requestBody);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"))
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response;
+        try {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (Exception e) {
+            logger.error("❌ 调用百炼 API 时发生异常", e);
+            throw new RuntimeException("AI 服务调用失败: " + e.getMessage(), e);
+        }
+
+        logger.debug("⬅️ 百炼 API 响应状态码: {}, 响应体: {}", response.statusCode(), response.body());
+
+        // 检查 HTTP 状态码
+        if (response.statusCode() != 200) {
+            logger.warn("⚠️ 百炼 API 返回非200状态码: {}，响应: {}", response.statusCode(), response.body());
+            throw new RuntimeException("AI 服务错误: HTTP " + response.statusCode());
+        }
+
+        // 解析 JSON 响应
+        JsonNode root = mapper.readTree(response.body());
+
+        // ✅ 关键修复：仅当存在 'code' 字段且不为 "200" 时，才视为业务错误
+        if (root.has("code")) {
+            String code = root.path("code").asText();
+            if (!"200".equals(code)) {
+                String errorMsg = root.path("message").asText("未知错误");
+                logger.warn("⚠️ 百炼 API 业务错误 - code: {}, message: {}, full response: {}", code, errorMsg, response.body());
+                throw new RuntimeException("AI 业务错误: " + errorMsg + " (code=" + code + ")");
+            }
+        }
+
+
+        // 正常路径：提取模型返回的消息
+        JsonNode choices = root.path("output").path("choices");
+        if (choices.isEmpty() || !choices.isArray() || choices.size() == 0) {
+            logger.warn("⚠️ 百炼 API 返回空 choices: {}", response.body());
+            throw new RuntimeException("AI 返回结果无效：choices 为空");
+        }
+        String requestId = root.path("request_id").asText("N/A");
+        logger.debug("📋 百炼 Request ID: {}", requestId);
+
+// 如果是错误，也带上 request_id
+        if (root.has("code") && !"200".equals(root.path("code").asText())) {
+            String errorMsg = root.path("message").asText("未知错误");
+            logger.warn("⚠️ 百炼 API 业务错误 - request_id: {}, code: {}, message: {}",
+                    requestId, root.path("code").asText(), errorMsg);
+            throw new RuntimeException("AI 业务错误: " + errorMsg);
+        }
+
+        return choices.get(0).path("message");
+    }
+
+
+
     // ===== 工具方法：将长回复拆成多条短消息（≤25字）=====
     public List<String> splitIntoShortMessages(String reply) {
         if (reply == null || reply.trim().isEmpty()) {
@@ -357,7 +632,7 @@ public class BaiLianService {
 
     // ===== 主动插话逻辑 =====
 
-    public Optional<Reaction> shouldReactToGroupMessage(String groupId, String userId, String nickname, String message,List<Long> ats) {
+    public Optional<Reaction> shouldReactToGroupMessage(String groupId, String userId, String nickname, String message, List<Long> ats) {
         if (userId.equals(String.valueOf(BOT_QQ))) return Optional.empty();
 
         long now = System.currentTimeMillis();
@@ -440,7 +715,10 @@ public class BaiLianService {
         }
 
         // 简单提及“糖果熊”
-        if (message.equals("糖果熊") && !isFollowUpMessage(message)) {
+        if (message.contains("糖果熊") &&
+                !isFollowUpMessage(message) &&
+                !message.contains("？") && !message.contains("?") &&
+                message.length() <= 15) {
             if (canReact(groupId)) {
                 recordReaction(groupId);
                 return Optional.of(Reaction.direct("我在呢，只是在发呆～"));
@@ -468,8 +746,6 @@ public class BaiLianService {
     }
 
     // ===== 辅助判断 =====
-
-
 
     private boolean isFollowUpMessage(String msg) {
         if (msg == null || msg.trim().isEmpty()) {
@@ -665,5 +941,4 @@ public class BaiLianService {
             return new Reaction(null, true, prompt);
         }
     }
-
 }

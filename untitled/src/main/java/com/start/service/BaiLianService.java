@@ -440,10 +440,7 @@ public class BaiLianService {
         }
 
         // 简单提及“糖果熊”
-        if (message.contains("糖果熊") &&
-                !isFollowUpMessage(message) &&
-                !message.contains("？") && !message.contains("?") &&
-                message.length() <= 15) {
+        if (message.equals("糖果熊") && !isFollowUpMessage(message)) {
             if (canReact(groupId)) {
                 recordReaction(groupId);
                 return Optional.of(Reaction.direct("我在呢，只是在发呆～"));

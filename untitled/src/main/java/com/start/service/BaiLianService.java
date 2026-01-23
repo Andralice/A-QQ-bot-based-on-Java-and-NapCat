@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.agent.Tool;
+import com.start.agent.UserAffinityTool;
+import com.start.agent.WeatherTool;
 import com.start.config.BotConfig;
 import com.start.repository.UserAffinityRepository;
 import com.start.repository.UserProfileRepository;
@@ -34,12 +36,13 @@ public class BaiLianService {
     private final BehaviorAnalyzer behaviorAnalyzer = new BehaviorAnalyzer();
     // 复用 ObjectMapper（避免重复创建）
     private static final ObjectMapper mapper = new ObjectMapper();
+    private static final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
 
     // HTTP 客户端
     private static final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-
+    private final ObjectMapper objectMapper = new ObjectMapper();
     // === 上下文管理 ===
     private final Map<String, List<Message>> sessions = new ConcurrentHashMap<>(); // sessionId -> 消息历史
     private final Map<String, Long> lastClearTime = new ConcurrentHashMap<>();
@@ -119,6 +122,54 @@ public class BaiLianService {
         // 记录本次 AI 调用日志，便于追踪和调试
         logger.info("🧠 AI 调用: sessionId={}, prompt=[{}]", sessionId, userPrompt);
         String context = "";
+        String agentToolContext = "";
+        boolean shouldBypassMainModel = false;
+        String directReplyFromAgent = null;
+        final List<Tool> availableTools = Arrays.asList(
+                new WeatherTool(),
+                new UserAffinityTool(userAffinityRepo)
+        );
+        try {
+            // 复用 BaiLianService 的 generateWithTools
+            JsonNode agentResponse = generateWithTools(userPrompt, availableTools, userId, groupId);
+
+            String content = agentResponse.path("content").asText().trim();
+            boolean hasToolCalls = agentResponse.has("tool_calls")
+                    && agentResponse.get("tool_calls").isArray()
+                    && !agentResponse.get("tool_calls").isEmpty();
+
+            if (hasToolCalls) {
+                // 执行工具调用，获取结果，作为上下文
+                JsonNode toolCall = agentResponse.get("tool_calls").get(0);
+                String toolName = toolCall.path("function").path("name").asText();
+                String argsJson = toolCall.path("function").path("arguments").asText();
+
+                Tool tool = availableTools.stream()
+                        .filter(t -> t.getName().equals(toolName))
+                        .findFirst()
+                        .orElse(null);
+
+                if (tool != null) {
+                    Map<String, Object> args = objectMapper.readValue(argsJson, Map.class);
+                    String toolResult = tool.execute(args);
+                    logger.info("🔧 主聊天中 Agent 工具 [{}] 结果: {}", toolName, toolResult);
+                    agentToolContext = "\n\n【工具执行结果】\n" + toolResult;
+                }
+                // 注意：即使有工具结果，也不 bypass 主模型！而是注入上下文
+            } else {
+                // 没有工具调用
+                if (!content.isEmpty()) {
+                    // Agent 直接给出了回答（如追问、拒绝等）
+                    // 这类内容通常不适合再经过糖果熊润色（比如“请提供城市名”）
+                    shouldBypassMainModel = true;
+                    directReplyFromAgent = content;
+                }
+                // 否则：content 为空，无工具调用 → 继续走主模型
+            }
+        } catch (Exception e) {
+            logger.warn("Agent 预处理失败，降级到主聊天", e);
+            // 不中断，继续走主模型
+        }
         try {
             UserProfileRepository profileRepo = new UserProfileRepository();
             UserAffinityRepository affinityRepo = new UserAffinityRepository();
@@ -208,6 +259,9 @@ public class BaiLianService {
             String systemPrompt = baseSystemPrompt+ "\n\n【当前与你对话的是】"+nickname+"\n【QQ号:】" + userId+"这是你对该用户信息："+context+"你可以根据用户画像和好感度高低进行不同的会话风格";
             if (!knowledgeContext.isEmpty()) {
                 systemPrompt += "\n\n【参考信息】\n" + knowledgeContext;
+            }
+            if (!agentToolContext.isEmpty()) {
+                systemPrompt += agentToolContext;
             }
 
             // 构建发送给百炼 API 的 messages 数组

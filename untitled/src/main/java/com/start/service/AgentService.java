@@ -3,9 +3,12 @@ package com.start.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import com.start.agent.KnowledgeBaseTool;
 import com.start.agent.Tool;
+import com.start.agent.UserAffinityTool;
 import com.start.agent.WeatherTool;
+import com.start.repository.UserAffinityRepository;
 import com.start.service.BaiLianService;
 import com.start.Main;
 import org.slf4j.Logger;
@@ -21,13 +24,13 @@ public class AgentService  {
     private final List<Tool> availableTools;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public AgentService(BaiLianService aiService, KeywordKnowledgeService knowledgeService) {
+    public AgentService(BaiLianService aiService, KeywordKnowledgeService knowledgeService, UserAffinityRepository affinityRepo) {
         this.aiService = aiService;
         this.availableTools = Arrays.asList(
-                new KnowledgeBaseTool(knowledgeService),
-                new WeatherTool()
-
-                // 可扩展：new WebSearchTool(), new CalculatorTool()...
+//                new KnowledgeBaseTool(knowledgeService),
+                new WeatherTool(),
+                new UserAffinityTool(affinityRepo)
+        // 可扩展：new WebSearchTool(), new CalculatorTool()...
         );
     }
 
@@ -39,7 +42,7 @@ public class AgentService  {
 
         try {
             // Step 1: 让 AI 决策是否需要调用工具
-            JsonNode response = aiService.generateWithTools(userPrompt, availableTools);
+            JsonNode response = aiService.generateWithTools(userPrompt, availableTools,userId,groupId);
 
             // 提取 content（可能为空，也可能有追问）
             String content = response.path("content").asText().trim();

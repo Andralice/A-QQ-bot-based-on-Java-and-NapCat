@@ -162,3 +162,19 @@ VALUES
 8,
 'keyword',
 '最好,朋友,挚友,密友');
+
+
+
+
+CREATE TABLE `user_profiles` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` varchar(50) NOT NULL COMMENT '用户QQ',
+  `group_id` varchar(50) DEFAULT NULL COMMENT '群号，私聊为NULL',
+  `profile_text` text NOT NULL COMMENT 'AI生成的人格画像文本',
+  `message_count_snapshot` int NOT NULL COMMENT '生成时累计的消息条数（用于判断是否需更新）',
+  `last_message_id` bigint NOT NULL COMMENT '最后一条用于分析的消息ID',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_group` (`user_id`, `group_id`) -- 每个用户在每个群有独立画像
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

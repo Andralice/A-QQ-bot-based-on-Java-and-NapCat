@@ -8,6 +8,8 @@ import com.start.config.BotConfig;
 import com.start.config.DatabaseConfig;
 import com.start.handler.AgentHandler;
 import com.start.handler.HandlerRegistry;
+import com.start.repository.MessageRepository;
+import com.start.repository.UserAffinityRepository;
 import com.start.service.*;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
@@ -35,6 +37,7 @@ public class Main extends WebSocketClient {
     private static final Set<Long> ALLOWED_PRIVATE_USERS = BotConfig.getAllowedPrivateUsers();
     private final UserService userService;
     private final MessageService messageService;
+    private static final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
     private PersonalityService personalityService;
     private final AIDatabaseService aiDatabaseService;
     private static BaiLianService baiLianService;
@@ -42,10 +45,10 @@ public class Main extends WebSocketClient {
     private static KeywordKnowledgeService keywordKnowledgeService;
     // ===== 新增：用于处理 WebSocket API 响应 =====
     private final Map<String, CompletableFuture<JsonNode>> pendingRequests = new ConcurrentHashMap<>();
-    public static AgentService agentService = new AgentService(baiLianService,keywordKnowledgeService); // 依赖注入
+    public static AgentService agentService = new AgentService(baiLianService,keywordKnowledgeService,userAffinityRepo); // 依赖注入
     // ===== 服务实例 =====
     private SpamDetector spamDetector;
-
+    private UserPortraitService portraitService;
     private final OneBotWsService oneBotWsService; // 新增
 
     static {
@@ -81,7 +84,7 @@ public class Main extends WebSocketClient {
         this.keywordKnowledgeService = new KeywordKnowledgeService(DatabaseConfig.getDataSource());
         this.handlerRegistry = new HandlerRegistry();
         this.baiLianService = new BaiLianService();
-        this.agentService = new AgentService(this.baiLianService, this.keywordKnowledgeService);
+        this.agentService = new AgentService(this.baiLianService, this.keywordKnowledgeService,this.userAffinityRepo);
 
     }
 
@@ -90,10 +93,34 @@ public class Main extends WebSocketClient {
         logger.info("🛡️ SpamDetector 初始化完成");
         BaiLianService.setKnowledgeService(this.keywordKnowledgeService);
         logger.info("🧠 BaiLianService 已绑定 KeywordKnowledgeService");
-        AgentService agentService = new AgentService(this.baiLianService, this.keywordKnowledgeService);
-
+        AgentService agentService = new AgentService(this.baiLianService, this.keywordKnowledgeService,userAffinityRepo);
         logger.info("🤖 Agent 已启用");
+        this.portraitService = new UserPortraitService(this.baiLianService, new MessageRepository());
+
+        // 立即执行一次（可选）
+        this.portraitService.runUpdateTask();
+        logger.info("👤 用户画像首次更新完成");
+
+        // 启动后台定时任务（每10分钟）
+        Thread timerThread = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    Thread.sleep(10 * 60 * 1000); // 10分钟
+                    this.portraitService.runUpdateTask();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    logger.error("❌ 用户画像更新任务异常", e);
+                }
+            }
+        }, "UserPortrait-Update-Thread");
+        timerThread.setDaemon(true);
+        timerThread.start();
+
+        logger.info("👤 用户画像系统已启动");
     }
+
 
     @Override
     public void onOpen(ServerHandshake handshakedata) {

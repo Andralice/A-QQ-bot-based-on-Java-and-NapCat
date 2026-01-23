@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.agent.Tool;
 import com.start.config.BotConfig;
+import com.start.repository.UserAffinityRepository;
+import com.start.repository.UserProfileRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.net.URI;
@@ -116,7 +118,29 @@ public class BaiLianService {
     public String generate(String sessionId, String userId, String userPrompt, String groupId,String nickname) {
         // 记录本次 AI 调用日志，便于追踪和调试
         logger.info("🧠 AI 调用: sessionId={}, prompt=[{}]", sessionId, userPrompt);
+        String context = "";
+        try {
+            UserProfileRepository profileRepo = new UserProfileRepository();
+            UserAffinityRepository affinityRepo = new UserAffinityRepository();
 
+            var profile = profileRepo.findByUserIdAndGroupId(userId, groupId);
+            var affinity = affinityRepo.findByUserIdAndGroupId(userId, groupId);
+
+            if (profile.isPresent()) {
+                context += "\n【用户画像】" + profile.get().getProfileText();
+            }
+            if (affinity.isPresent()) {
+                int score = affinity.get().getAffinityScore();
+                context+="\n你们的好感度是"+ score+",每人的基础好感度是50";
+//                if (score >= 80) {
+//                    context += "\n【你们关系很好，可以更亲切】";
+//                } else if (score <= 30) {
+//                    context += "\n【对方对你较冷淡，请保持礼貌】";
+//                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
         // ====== 第1步：查询知识库（仅用于增强上下文，不直接返回） ======
         // 调用知识库服务，根据用户提问、用户ID和群组ID进行语义检索
         KeywordKnowledgeService.KnowledgeResult knowledgeResult =
@@ -145,7 +169,8 @@ public class BaiLianService {
         // ====== 第2步：走百炼AI流程（始终调用） ======
         try {
             // 将用户消息持久化到数据库（用于审计、回溯等）
-            aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId);
+            Long isagent = 1L;
+            aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId,isagent);
 
             // 从 sessions 缓存中获取或初始化当前会话的历史消息列表
             // sessions 是一个 ConcurrentHashMap<String, List<Message>>，用于短期内存缓存对话历史
@@ -180,7 +205,7 @@ public class BaiLianService {
 """;
             // 若知识库有有效上下文，则将其附加到 system prompt 中
             // 这样大模型在生成时能参考外部知识，实现 RAG（检索增强生成）
-            String systemPrompt = baseSystemPrompt+ "\n\n【当前与你对话的是】"+nickname+"\nQQ号: " + userId;
+            String systemPrompt = baseSystemPrompt+ "\n\n【当前与你对话的是】"+nickname+"\n【QQ号:】" + userId+"这是你对该用户信息："+context+"你可以根据用户画像和好感度高低进行不同的会话风格";
             if (!knowledgeContext.isEmpty()) {
                 systemPrompt += "\n\n【参考信息】\n" + knowledgeContext;
             }
@@ -319,12 +344,12 @@ public class BaiLianService {
 
             // ⭐ 关键：Agent 的 system prompt（中立、指令明确）
             String systemPrompt = """
-你是一个高效、准确的智能助手，专注于回答用户的问题或执行指定任务。
-- 回答应简洁、事实准确
-- 若调用了工具，请基于工具结果直接作答
-- 不要添加无关语气词、拟人化表达或文艺修饰
-- 如果不知道答案，直接说“无法提供相关信息”
-""";
+            你是一个高效、准确的智能助手，专注于回答用户的问题或执行指定任务。
+            - 回答应简洁、事实准确
+            - 若调用了工具，请基于工具结果直接作答
+            - 不要添加无关语气词、拟人化表达或文艺修饰
+            - 如果不知道答案，直接说“无法提供相关信息”
+            """;
             messages.add(Map.of("role", "system", "content", systemPrompt));
             messages.add(Map.of("role", "user", "content", userPrompt));
 
@@ -395,7 +420,17 @@ public class BaiLianService {
 
     // BaiLianService.java
 
-    public JsonNode generateWithTools(String userPrompt, List<Tool> tools) throws Exception {
+    public JsonNode generateWithTools(String userPrompt, List<Tool> tools, String userId, String groupId) throws Exception {
+        String contextInfo;
+        if (groupId != null) {
+            contextInfo = "[群聊] 群ID: " + groupId + " | 用户ID: " + userId;
+        } else {
+            contextInfo = "[私聊] 用户ID: " + userId;
+        }
+        String enrichedPrompt = contextInfo + "\n\n用户消息: " + userPrompt;
+        Long isagent= 1L;
+        String sessionId = "group_" + groupId + "_" + userId;
+        aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId,isagent);
         // 构建消息历史
         List<Map<String, String>> messages = new ArrayList<>();
         messages.add(Map.of("role", "system", "content", "你是一个智能助手，能根据需要调用工具解决问题。你必须严格遵守以下规则：\n" +
@@ -403,7 +438,7 @@ public class BaiLianService {
                 "- 不要解释你要做什么，不要输出任何额外文字。\n" +
                 "- 直接通过函数调用获取结果。\n" +
                 "- 工具调用由系统自动处理，你只需决定是否调用。"));
-        messages.add(Map.of("role", "user", "content", userPrompt));
+        messages.add(Map.of("role", "user", "content", enrichedPrompt));
 
         // 构建工具列表
         List<Map<String, Object>> toolSpecs = tools.stream()

@@ -1,8 +1,10 @@
 package com.start.handler;
 
+import com.start.agent.UserAffinityTool;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.start.Main;
 import com.start.config.DatabaseConfig;
+import com.start.repository.UserAffinityRepository;
 import com.start.service.AgentService;
 import com.start.service.BaiLianService;
 import com.start.service.KeywordKnowledgeService;
@@ -13,19 +15,20 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class HandlerRegistry {
+    private static final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
     private static final List<MessageHandler> handlers = new ArrayList<>();
     private static final Logger logger = LoggerFactory.getLogger(HandlerRegistry.class);
 
     private static final BaiLianService baiLianService = new BaiLianService();
     private static final KeywordKnowledgeService knowledgeService = new KeywordKnowledgeService(DatabaseConfig.getDataSource());
-    private static final AgentService agentService = new AgentService(baiLianService, knowledgeService);
+    private static final AgentService agentService = new AgentService(baiLianService, knowledgeService,userAffinityRepo);
 
     static {
         // 注册所有 Handler（顺序很重要！先匹配的先生效）
         handlers.add(new AgentHandler(agentService));
         logger.debug("未使用agent");
         // 后续新增功能，只需在这里 add(new XxxHandler())
-//        handlers.add(new AIHandler());
+        handlers.add(new AIHandler());
     }
     public static void dispatch(JsonNode message, Main bot) {
         for (MessageHandler handler : handlers) {

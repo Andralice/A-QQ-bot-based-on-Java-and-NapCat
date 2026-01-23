@@ -24,7 +24,7 @@ public class KnowledgeBaseTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "查询内部知识库，回答关于居住地和兴趣的问题，例如：'美食'、'烤肉'、'音乐'";
+        return "查询内部知识库，回答关于居住地和兴趣的问题，例如：'美食'、'烤肉'、'音乐'、'追番'、'书籍'、'城市'";
     }
 
     // ✅ 新增：定义工具所需的参数结构（JSON Schema）

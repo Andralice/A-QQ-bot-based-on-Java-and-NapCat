@@ -2,6 +2,6 @@
 重构MessageService
 重构UserService
 
-修复说话方式，
+修复说话方式,      √
 增加长期记忆
-增加知识库
+增加知识库,        √

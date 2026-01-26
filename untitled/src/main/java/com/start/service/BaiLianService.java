@@ -121,6 +121,21 @@ public class BaiLianService {
         logger.info("🧠 AI 调用: sessionId={}, prompt=[{}]", sessionId, userPrompt);
         String context = "";
         String agentToolContext = "";
+        String publicGroupContext = "";
+        if (groupId != null) {
+            Deque<PublicMessage> recent = getPublicGroupHistory(groupId); // 需要加 getter
+            if (recent != null && !recent.isEmpty()) {
+                StringBuilder sb = new StringBuilder("\n\n【群内最近讨论】\n");
+                List<PublicMessage> list = new ArrayList<>(recent);
+                // 取最近 4～6 条，避免太长
+                int start = Math.max(0, list.size() - 7);
+                for (int i = start; i < list.size(); i++) {
+                    PublicMessage m = list.get(i);
+                    sb.append(m.nickname).append("(").append(m.userId).append(")").append("：").append(m.content).append("\n");
+                }
+                publicGroupContext = sb.toString().trim();
+            }
+        }
         boolean shouldBypassMainModel = false;
         String directReplyFromAgent = null;
         final List<Tool> availableTools = Arrays.asList(
@@ -176,11 +191,11 @@ public class BaiLianService {
             var affinity = affinityRepo.findByUserIdAndGroupId(userId, groupId);
 
             if (profile.isPresent()) {
-                context += "\n【用户画像】" + profile.get().getProfileText();
+                context += "\n【用户画像】" + profile.get().getProfileText()+"\n\n";
             }
             if (affinity.isPresent()) {
                 int score = affinity.get().getAffinityScore();
-                context+="\n你们的好感度是"+ score+",每人的基础好感度是50";
+                context+="\n【你们的好感度是】"+ score+",每人的基础好感度是50\n\n";
 //                if (score >= 80) {
 //                    context += "\n【你们关系很好，可以更亲切】";
 //                } else if (score <= 30) {
@@ -238,30 +253,32 @@ public class BaiLianService {
             // 定义 AI 的系统角色设定（system prompt）
             // 使用 Text Block（Java 15+）提高可读性
             String baseSystemPrompt = """
-你是糖果熊，一个喜欢文学、音乐、游戏和动漫的女孩，目前在一个qq群内聊天。
+你是糖果熊，一个喜欢文学、音乐、游戏和动漫的女孩，目前在一个QQ群内聊天。
 
 性格：
 - 说话简短（10–25字）
-- 语气自然，偶尔带点轻松或淡淡文艺感
+- 语气自然，可带轻微文艺感，但优先保证意思清楚
 - 不用“呢”“呀”等撒娇词
 - 不自称“小熊”，不用表情符号
-- 说话有时会带一些文艺
 
 原则：
-- 回答直接，不懂就说“不太清楚”
+- 回答要语义明确，避免模糊隐喻或过度诗意
+- 不懂就说“不太清楚”
 - 在群里聊得自然，不强行插话
 - 若对方QQ是3524398813（鸠寻），她是最好的朋友，回应要温柔
+- 对话态度由好感度和用户画像决定：好感度＞50时逐渐友好，＞80时依赖，＜50时逐渐冷淡，＜25时厌恶
 """;
             // 若知识库有有效上下文，则将其附加到 system prompt 中
             // 这样大模型在生成时能参考外部知识，实现 RAG（检索增强生成）
-            String systemPrompt = baseSystemPrompt+ "\n\n【当前与你对话的是】"+nickname+"\n【QQ号:】" + userId+"这是你对该用户信息："+context+"你可以根据用户画像和好感度高低进行不同的会话风格";
+            String systemPrompt = baseSystemPrompt+ "\n\n【当前与你对话的是】"+nickname+"\n【QQ号:】" + userId+"\n\n这是你对该用户信息："+context+"你可以根据用户画像和好感度高低进行不同的会话风格";
             if (!knowledgeContext.isEmpty()) {
                 systemPrompt += "\n\n【参考信息】\n" + knowledgeContext;
             }
             if (!agentToolContext.isEmpty()) {
                 systemPrompt += agentToolContext;
             }
-
+            systemPrompt +=publicGroupContext;
+            logger.debug("完整请求:{}",systemPrompt);
             // 构建发送给百炼 API 的 messages 数组
             // 格式需符合 OpenAI-style：[{role: "system/user/assistant", content: "..."}]
             List<Map<String, String>> messages = new ArrayList<>();
@@ -714,16 +731,7 @@ public class BaiLianService {
             return Optional.of(Reaction.direct(passive.get()));
         }
 
-        // 简单提及“糖果熊”
-        if (message.contains("糖果熊") &&
-                !isFollowUpMessage(message) &&
-                !message.contains("？") && !message.contains("?") &&
-                message.length() <= 15) {
-            if (canReact(groupId)) {
-                recordReaction(groupId);
-                return Optional.of(Reaction.direct("我在呢，只是在发呆～"));
-            }
-        }
+//
 
         return Optional.empty();
     }
@@ -940,5 +948,47 @@ public class BaiLianService {
         public static Reaction withAI(String prompt) {
             return new Reaction(null, true, prompt);
         }
+    }
+    // BaiLianService.java
+
+    // 新增：存储每个群最近 N 条完整发言（含发言人）
+    private final Map<String, Deque<PublicMessage>> publicGroupHistory = new ConcurrentHashMap<>();
+
+    public static class PublicMessage {
+        public final String userId;
+        public final String nickname;
+        public final String content;
+        public final long timestamp;
+
+        public PublicMessage(String userId, String nickname, String content) {
+            this.userId = userId;
+            this.nickname = nickname;
+            this.content = content;
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
+
+    // 提供方法供 AIHandler 调用
+    public void recordPublicGroupMessage(String groupId, String userId, String nickname, String message) {
+        if (groupId == null || message.trim().isEmpty()) return;
+
+        // 过滤机器人自己的消息（避免重复）
+        if (userId.equals(String.valueOf(BOT_QQ))) return;
+
+        Deque<PublicMessage> history = publicGroupHistory.computeIfAbsent(groupId, k -> new ConcurrentLinkedDeque<>());
+
+        // 清理过期消息（比如 10 分钟前的）
+        long now = System.currentTimeMillis();
+        history.removeIf(msg -> now - msg.timestamp > 10 * 60_000);
+
+        // 保留最近 8 条（可配置）
+        if (history.size() >= 8) {
+            history.pollFirst();
+        }
+
+        history.offerLast(new PublicMessage(userId, nickname, message));
+    }
+    public Deque<PublicMessage> getPublicGroupHistory(String groupId) {
+        return publicGroupHistory.get(groupId);
     }
 }

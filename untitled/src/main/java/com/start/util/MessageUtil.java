@@ -62,23 +62,38 @@ public class MessageUtil {
 
     /**
      * 提取消息中所有被 @ 的 QQ 号
+     * 支持 JSON 数组格式的消息段，安全解析
      */
     public static List<Long> extractAts(JsonNode messageNode) {
         List<Long> ats = new ArrayList<>();
-        if (messageNode == null || messageNode.isNull()) return ats;
+        if (messageNode == null || messageNode.isNull() || !messageNode.isArray()) {
+            return ats;
+        }
 
-        if (messageNode.isArray()) {
-            for (JsonNode seg : messageNode) {
-                if ("at".equals(seg.path("type").asText())) {
-                    try {
-                        long qq = seg.path("data").path("qq").asLong();
-                        ats.add(qq);
-                    } catch (Exception e) {
-                        logger.warn("解析 @ 段失败: {}", seg);
-                    }
+        for (JsonNode seg : messageNode) {
+            // 确保 seg 是对象
+            if (!seg.isObject()) continue;
+
+            JsonNode typeNode = seg.path("type");
+            if (!"at".equals(typeNode.asText())) continue;
+
+            JsonNode dataNode = seg.path("data");
+            if (dataNode == null || !dataNode.isObject()) continue;
+
+            JsonNode qqNode = dataNode.path("qq");
+            if (qqNode == null || !qqNode.isNumber() && !qqNode.isTextual()) continue;
+
+            try {
+                long qq = qqNode.asLong();
+                // QQ 号必须大于 0，且不超过 2^63-1（实际最大约 20 位）
+                if (qq > 0 && qq < 1000000000000000000L) {
+                    ats.add(qq);
                 }
+            } catch (Exception e) {
+                logger.warn("解析 @ 段失败: {}", seg, e);
             }
         }
+
         return ats;
     }
 

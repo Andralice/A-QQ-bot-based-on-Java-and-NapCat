@@ -39,14 +39,12 @@ public class Main extends WebSocketClient {
     private final UserService userService;
     private final MessageService messageService;
     private static final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
-    private UserService userService;
-    private MessageService messageService;
+
     private ConversationService conversationService;
     private PersonalityService personalityService;
     private final AIDatabaseService aiDatabaseService;
     private static BaiLianService baiLianService;
-    private AIDatabaseService aiDatabaseService;
-    private BaiLianService baiLianService;
+
     private HandlerRegistry handlerRegistry;
     private static KeywordKnowledgeService keywordKnowledgeService;
     // ===== 新增：用于处理 WebSocket API 响应 =====

@@ -46,7 +46,8 @@ public class AIHandler implements MessageHandler {
         long userId = msg.path("user_id").asLong();
         String messageType = msg.path("message_type").asText();
         long groupId = msg.path("group_id").asLong();
-        List<Long> ats = extractAts(msg);
+        JsonNode messageArray = msg.path("message");
+        List<Long> ats = extractAts(messageArray);
         String nickname = msg.path("sender").path("nickname").asText();
         if (userId == selfId) return;
 
@@ -64,8 +65,13 @@ public class AIHandler implements MessageHandler {
         }
 
         // 群聊：先记录原始消息到上下文
-        aiService.addGroupMessage(String.valueOf(groupId), senderNick + ": " + plainText);
-
+//        aiService.addGroupMessage(String.valueOf(groupId), senderNick + ": " + plainText);
+        aiService.recordPublicGroupMessage(
+                String.valueOf(groupId),
+                String.valueOf(userId),
+                senderNick,
+                plainText
+        );
         // 明确触发（#ai / !ai / @）
         if (isExplicitTrigger(msg, rawMessage)) {
             handleExplicitAIRequest(bot, msg, userId, groupId, rawMessage, plainText,nickname);
@@ -205,4 +211,5 @@ public class AIHandler implements MessageHandler {
             bot.sendGroupReply(groupId, msg);
         }
     }
+
 }

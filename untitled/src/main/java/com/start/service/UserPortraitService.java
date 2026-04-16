@@ -21,6 +21,18 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
+
+/**
+ * 用户画像服务类
+ * <p>
+ * 负责基于用户的聊天记录，利用 AI（百炼）动态生成和更新用户画像及好感度。
+ * 主要功能包括：
+ * 1. 筛选需要更新画像的活跃用户/群组组合。
+ * 2. 获取指定用户的新增聊天记录。
+ * 3. 调用 AI 分析聊天内容，提取兴趣标签并计算好感度变化。
+ * 4. 持久化更新后的用户画像（UserProfile）和好感度信息（UserAffinity）。
+ * </p>
+ */
 public class UserPortraitService {
     Logger logger = LoggerFactory.getLogger(UserPortraitService.class);
     private final BaiLianService baiLianService; // 假设你有这个类
@@ -100,7 +112,10 @@ public class UserPortraitService {
                 .collect(Collectors.joining("\n"));
 
         StringBuilder prompt = new StringBuilder();
-        prompt.append("你是一个用户行为分析师，目前的身份是qq聊天群内的一个群员，请根据以下信息更新你对用户画像和好感度，好感度根据主动聊天次数和说话的友好程度决定,用户画像可以保留对该群员的一些兴趣介绍等，之前的用户画像要总结进新的里，保留真实知识（该群员的兴趣之类）。\n\n");
+        prompt.append("你是一个 QQ 群聊天机器人。请基于聊天记录持续更新对该用户的认知：\n" +
+                "用户画像：记录其真实兴趣（如“常聊原神”“关注 A 股”），新信息合并进旧画像，不虚构。\n" +
+                "好感度：根据该用户是否主动找你聊天、语气是否友好（如用“谢谢”、表情包）动态调整，初始 50 分（0–100）。\n" +
+                "始终以“你（AI）对该用户”的视角理解。\n\n");
         if (profileOpt.isPresent()) {
             prompt.append("【当前画像】\n").append(profileOpt.get().getProfileText()).append("\n\n");
         }

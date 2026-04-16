@@ -10,6 +10,10 @@ import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+
+/**
+ * 抽职业
+ */
 public class DailyProfessionHandler implements MessageHandler {
     private static final Logger logger = LoggerFactory.getLogger(DailyProfessionHandler.class);
 

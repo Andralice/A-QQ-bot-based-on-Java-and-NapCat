@@ -13,10 +13,14 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+
+/**
+ * 用户数据访问类
+ */
 public class UserRepository extends BaseRepository {
 
     /**
-     * 创建或更新用户（异常安全）
+     * 创建或更新用户
      */
     public DatabaseResult<Void> createOrUpdateUser(String userId, String nickname) {
         return safeExecute(() -> {

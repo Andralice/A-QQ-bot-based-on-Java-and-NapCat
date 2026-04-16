@@ -7,6 +7,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 对话线程仓库
+ */
 public class ConversationThreadRepository extends BaseRepository {
 
     /**

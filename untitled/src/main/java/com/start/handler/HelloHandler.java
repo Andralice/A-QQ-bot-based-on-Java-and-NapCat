@@ -5,15 +5,18 @@ import com.start.Main;
 import com.start.config.BotConfig;
 import com.start.util.MessageUtil;
 
+
+/**
+ * 示例：处理「你好」
+ */
 public class HelloHandler implements MessageHandler {
     @Override
     public boolean match(JsonNode msg) {
         String messageType = msg.path("message_type").asText();
         long selfId = msg.path("self_id").asLong();
         if ("private".equals(messageType)) {
-            String raw = msg.path("raw_message").asText().trim();
-            if (raw.isEmpty()) return false;
-            return true ;
+            String text = MessageUtil.extractPlainText(msg.path("message"));
+            return !text.trim().isEmpty() && text.contains("你好");
         }
         else if ("group".equals(messageType)) {
             String text = MessageUtil.extractPlainText(msg.path("message"));

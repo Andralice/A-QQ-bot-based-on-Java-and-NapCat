@@ -14,6 +14,7 @@ TASKS = {
     "kkrb-overview": {
         "url": "https://www.kkrb.net/?viewpage=view%2Foverview",
         "selector": "#overview-swat-product-container",
+        "needs_profit_switch": True,
     },
     "stock-chart": {
         "url": "https://example.com/chart",
@@ -24,6 +25,22 @@ TASKS = {
         "selector": "#overview-bcic-container",
     },
     "kkrb-overview-3": {
+        "url": "https://www.kkrb.net/?viewpage=view%2Foverview",
+        "selector": "#overview-bonus-door-container",
+    },
+    "kkrb-overview-1-1": {
+        "url": "https://www.kkrb.net/?viewpage=view%2Foverview",
+        "selector": "#layui-table-box",
+    },
+    "kkrb-overview-1-2": {
+        "url": "https://www.kkrb.net/?viewpage=view%2Foverview",
+        "selector": "#layui-table-box",
+    },
+    "kkrb-overview-1-3": {
+        "url": "https://www.kkrb.net/?viewpage=view%2Foverview",
+        "selector": "#overview-bonus-door-container",
+    },
+    "kkrb-overview-1-4": {
         "url": "https://www.kkrb.net/?viewpage=view%2Foverview",
         "selector": "#overview-bonus-door-container",
     }
@@ -70,23 +87,56 @@ def take_screenshot(task_name, output_path):
             page.screenshot(path="/tmp/debug-after-goto.png")
             print("📸 已保存初始状态截图: /tmp/debug-after-goto.png", file=sys.stderr)
 
-            # 等待 JS 渲染
-            time.sleep(1)
+            # 等待 JS 渲染（Layui 初始化需要时间）
+            time.sleep(2)  # 延长至 2 秒
 
             # ✅ 精准关闭 layui 弹窗
             try:
-                # 等待弹窗出现（最多 10 秒）
                 page.wait_for_selector(".layui-layer-dialog", timeout=10000)
                 print("🔍 发现弹窗，准备关闭...", file=sys.stderr)
-
-                # 点击“确定”按钮（a 标签）
                 page.click(".layui-layer-btn0")
                 print("✅ 已点击‘确定’按钮关闭弹窗", file=sys.stderr)
-
-                # 短暂等待确保弹窗消失
-                page.wait_for_timeout(250)
+                page.wait_for_timeout(500)  # 稍等确保弹窗完全消失
             except Exception as e:
                 print(f"⚠️ 弹窗未找到或点击失败（可能已自动关闭）: {e}", file=sys.stderr)
+
+            # ✅ 条件性触发 profitSwitch（增强版）
+            if config.get("needs_profit_switch", False):
+                try:
+                    container_selector = "#profitSwitch + .layui-unselect"
+                    print(f"🔍 等待利润开关容器出现: {container_selector}", file=sys.stderr)
+                    page.wait_for_selector(container_selector, timeout=12000)
+
+                    # 获取当前 class
+                    current_class = page.locator(container_selector).get_attribute("class") or ""
+                    is_on = "layui-form-onswitch" in current_class
+
+                    print(f"🔧 当前开关 class: '{current_class}'", file=sys.stderr)
+                    print(f"📊 当前开关状态: {'开启（小时利润）' if is_on else '关闭（总利润）'}", file=sys.stderr)
+
+                    if not is_on:
+                        print("🔄 正在点击开关容器以切换到‘小时利润’模式...", file=sys.stderr)
+                        # 👉 关键：点击可视化 div，不是 input
+                        page.click(container_selector)
+                        page.wait_for_timeout(1200)  # 给 JS 足够时间加载新数据
+
+                        # 验证是否成功
+                        new_class = page.locator(container_selector).get_attribute("class") or ""
+                        new_is_on = "layui-form-onswitch" in new_class
+                        print(f"🔧 切换后 class: '{new_class}'", file=sys.stderr)
+                        if new_is_on:
+                            print("✅ 开关已成功切换为‘小时利润’模式", file=sys.stderr)
+                        else:
+                            print("❌ 开关点击后仍未开启！可能被阻止或 JS 未响应", file=sys.stderr)
+                            page.screenshot(path="/tmp/debug-switch-fail.png")
+                            print("📸 已保存开关操作失败截图: /tmp/debug-switch-fail.png", file=sys.stderr)
+                    else:
+                        print("ℹ️ 开关已处于‘小时利润’模式，无需操作", file=sys.stderr)
+
+                except Exception as e:
+                    print(f"💥 利润开关操作异常: {e}", file=sys.stderr)
+                    page.screenshot(path="/tmp/debug-switch-error.png")
+                    print("📸 已保存异常状态截图: /tmp/debug-switch-error.png", file=sys.stderr)
 
             # 等待目标容器加载
             try:
@@ -103,12 +153,10 @@ def take_screenshot(task_name, output_path):
             except Exception as e:
                 print(f"⚠️ 滚动失败（可能元素不可滚动）: {e}", file=sys.stderr)
 
-            # 👇 第二步：额外向上滚动一点（避开底部固定层）
+            # 👇 额外向上滚动一点（避开底部固定层）
             try:
-                # 向上滚动 150px（根据你的截图调整）
                 page.evaluate("window.scrollBy(0, 150);")
                 print("▲ 额外向上滚动 150px 以避开底部遮挡", file=sys.stderr)
-                # 📸 新增：保存滚动后的调试截图
                 page.screenshot(path="/tmp/debug-after-scroll.png")
                 print("📸 已保存滚动后状态: /tmp/debug-after-scroll.png", file=sys.stderr)
             except Exception as e:
@@ -129,16 +177,13 @@ def take_screenshot(task_name, output_path):
                 print(f"⚠️ 局部截图失败 ({e})，尝试全页截图", file=sys.stderr)
 
             if not success:
-                # 全页截图
                 page.screenshot(path=output_path, full_page=True)
                 print(f"📸 使用全页截图: {output_path}", file=sys.stderr)
 
-                # 👇 第三步（终极兜底）：自动裁剪底部（需 Pillow）
                 if HAS_PIL:
                     try:
                         img = Image.open(output_path)
                         width, height = img.size
-                        # 裁掉底部 100 像素（根据你的截图调整）
                         cropped = img.crop((0, 0, width, max(0, height - 100)))
                         cropped.save(output_path)
                         print("✂️ 已自动裁剪底部 100px", file=sys.stderr)

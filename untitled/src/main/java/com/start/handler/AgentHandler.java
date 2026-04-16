@@ -8,6 +8,9 @@ import com.start.util.MessageUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * 🤖 智能助手处理器
+ */
 public class AgentHandler implements MessageHandler {
 
     private final AgentService agentService;

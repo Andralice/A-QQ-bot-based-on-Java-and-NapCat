@@ -6,6 +6,9 @@ import com.start.service.JokeService;
 import com.start.util.RateLimiter;
 import com.start.Main; // 确保导入 Main
 
+/**
+ * 笑话处理类
+ */
 public class JokeHandler implements MessageHandler {
 
     @Override

@@ -3,6 +3,16 @@ package com.start.util;
 import java.time.LocalDate;
 import java.util.Random;
 
+/**
+ * 幸运值工具类
+ * <p>
+ * 提供基于用户ID和日期的确定性随机幸运值生成服务。
+ * 同一用户在同一日期内获取的幸运值是固定的，不同日期或不同用户则不同。
+ * </p>
+ *
+ * @author Lingma
+ * @version 1.0
+ */
 public class LuckUtil {
 
     /**

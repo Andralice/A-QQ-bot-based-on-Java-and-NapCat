@@ -7,6 +7,9 @@ import com.start.model.UserAffinity;
 import java.sql.*;
 import java.util.Optional;
 
+/**
+ * UserAffinity 数据库操作类
+ */
 public class UserAffinityRepository {
 
     public Optional<UserAffinity> findByUserIdAndGroupId(String userId, String groupId) throws SQLException {

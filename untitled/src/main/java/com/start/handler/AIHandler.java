@@ -15,6 +15,9 @@ import java.util.Random;
 
 import static com.start.util.MessageUtil.extractAts;
 
+/**
+ * AIHandler  ai模块入口
+ */
 public class AIHandler implements MessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(AIHandler.class);

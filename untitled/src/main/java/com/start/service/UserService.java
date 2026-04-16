@@ -4,6 +4,17 @@ package com.start.service;
 import com.start.model.ChatUser;
 import com.start.repository.UserRepository;
 import java.util.Optional;
+/**
+ * 用户服务类
+ * <p>
+ * 负责处理与用户相关的业务逻辑，包括用户的创建、查询、更新以及偏好获取等操作。
+ * 该类通过 {@link UserRepository} 与数据层进行交互，确保用户数据的持久化和一致性。
+ * </p>
+ *
+ * @author Lingma
+ * @version 1.0
+ */
+
 
 public class UserService {
     private final UserRepository userRepo;

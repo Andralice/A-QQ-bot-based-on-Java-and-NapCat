@@ -7,6 +7,9 @@ import com.start.util.MessageUtil;
 import com.start.util.LuckUtil;
 import com.start.util.RateLimiter;
 
+/**
+ * 幸运值
+ */
 public class LuckHandler implements MessageHandler {
     // 30秒内同一用户不能重复触发
     private static final RateLimiter rateLimiter = new RateLimiter(5);

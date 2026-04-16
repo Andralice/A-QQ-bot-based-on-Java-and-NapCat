@@ -7,6 +7,10 @@ import com.start.model.UserProfile;
 import java.sql.*;
 import java.util.Optional;
 
+
+/**
+ * 用户资料仓库
+ */
 public class UserProfileRepository {
 
     public Optional<UserProfile> findByUserIdAndGroupId(String userId, String groupId) throws SQLException {

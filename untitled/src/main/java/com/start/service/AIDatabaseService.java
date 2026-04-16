@@ -11,6 +11,9 @@ import org.slf4j.LoggerFactory;
 import java.time.LocalDateTime;
 import java.util.*;
 
+/**
+ * 数据库服务类
+ */
 public class AIDatabaseService {
 
     private final UserRepository userRepo = new UserRepository();

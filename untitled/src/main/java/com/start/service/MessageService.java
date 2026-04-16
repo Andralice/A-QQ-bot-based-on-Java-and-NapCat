@@ -6,6 +6,17 @@ import com.start.repository.MessageRepository;
 import java.time.LocalDateTime;
 import java.util.*;
 
+/**
+ * 消息服务类
+ * <p>
+ * 负责处理QQ机器人消息的持久化存储、上下文检索以及群聊活跃度统计。
+ * 主要功能包括：
+ * 1. 保存用户发送的消息及AI生成的回复到数据库。
+ * 2. 提取并存储消息中的话题标签（针对群聊非私密消息）。
+ * 3. 获取指定会话的历史对话上下文，用于构建AI提示词。
+ * 4. 统计指定群聊在特定时间窗口内的活跃程度。
+ * </p>
+ */
 public class MessageService {
     private final MessageRepository messageRepo;
 

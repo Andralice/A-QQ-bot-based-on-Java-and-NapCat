@@ -7,6 +7,9 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * 检测连续相同内容（刷屏）
+ */
 public class SpamDetector {
     private static final Logger logger = LoggerFactory.getLogger(SpamDetector.class);
 

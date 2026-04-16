@@ -35,6 +35,24 @@ import java.util.stream.Collectors;
 // 引入 HanLP（需添加依赖：com.hankcs:hanlp:portable-1.8.3 或更高）
 import com.hankcs.hanlp.HanLP;
 
+/**
+ * 关键词匹配知识库管理器
+ * <p>
+ * 该类负责管理基于关键词的问答知识库，主要功能包括：
+ * 1. 从数据库加载活跃的知识条目（问题模式、答案、优先级等）。
+ * 2. 利用 HanLP 进行中文分词和关键词提取。
+ * 3. 支持同义词扩展，提高匹配的泛化能力。
+ * 4. 提供高效的缓存机制（ConcurrentHashMap），加速关键词检索。
+ * 5. 计算用户问题与知识条目的匹配得分，返回最相关的答案。
+ * 6. 记录命中日志并更新知识条目的命中次数，用于优化知识库。
+ * <p>
+ * 核心流程：
+ * - 初始化时加载全量知识到内存缓存。
+ * - 查询时提取用户问题的关键词，并通过同义词表扩展。
+ * - 根据关键词快速筛选候选知识条目。
+ * - 对候选条目进行细粒度打分（考虑关键词重合度、优先级、长度惩罚等）。
+ * - 返回得分最高且超过阈值的结果。
+ */
 public class KeywordKnowledgeService {
 
     private final HikariDataSource dataSource;

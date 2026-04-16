@@ -30,6 +30,13 @@
             <artifactId>Java-WebSocket</artifactId>
             <version>1.5.3</version>
         </dependency>
+        <!-- 已有 jackson 和 java.net.http，无需额外依赖 -->
+        <!-- 但建议加 commons-codec 处理 base64（可选） -->
+        <dependency>
+            <groupId>commons-codec</groupId>
+            <artifactId>commons-codec</artifactId>
+            <version>1.16.1</version>
+        </dependency>
 
         <!-- JSON 解析 -->
         <dependency>

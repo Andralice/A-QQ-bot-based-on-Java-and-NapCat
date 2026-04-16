@@ -1,5 +1,6 @@
 package com.start.config;
 
+import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,13 +15,21 @@ import java.util.stream.Collectors;
 
 public class BotConfig {
     private static final Logger logger = LoggerFactory.getLogger(BotConfig.class);
+    @Getter
     private static long botQq;
+    @Getter
     private static String botName;
     private static Set<Long> ALLOWED_GROUPS ;
     private static Set<Long> ALLOWED_PRIVATE_USERS ;
+    // 新增 getter
+    @Getter
     private static boolean privateWhitelistEnabled = false;
+    @Getter
     private static String oneBotHttpBaseUrl;
+    @Getter
     private static String oneBotAccessToken;
+    @Getter
+    private static String WsBaseUrl;
     static {
         try (InputStream is = BotConfig.class.getClassLoader().getResourceAsStream("application.properties")) {
             if (is == null) {
@@ -38,6 +47,7 @@ public class BotConfig {
             }
             botQq = Long.parseLong(qqStr.trim());
             oneBotHttpBaseUrl = props.getProperty("onebot.http-base-url", "http://127.0.0.1:5700").trim();
+            WsBaseUrl = props.getProperty("ws.base.url", "ws://127.0.0.1:6700").trim();
             oneBotAccessToken = props.getProperty("onebot.access-token", "").trim();
 //            botName = props.getProperty("bot.name", "机器人").trim();
             botName = "糖果熊";
@@ -70,23 +80,11 @@ public class BotConfig {
                 .collect(Collectors.toSet()); // 收集成 Set<Long>
     }
 
-    public static long getBotQq() {
-        return botQq;
-    }
-
-    public static String getBotName() {
-        return botName;
-    }
-
     public static Set<Long> getAllowedGroups() { return ALLOWED_GROUPS; }
     public static Set<Long> getAllowedPrivateUsers() { return ALLOWED_PRIVATE_USERS; }
-    // 新增 getter
-    public static boolean isPrivateWhitelistEnabled() {
-        return privateWhitelistEnabled;
-    }
+
     public static String getAt(long userId) {
         return "[CQ:at,qq=" + userId + "]";
     }
-    public static String getOneBotHttpBaseUrl() { return oneBotHttpBaseUrl; }
-    public static String getOneBotAccessToken() { return oneBotAccessToken; }
+
 }

@@ -8,6 +8,10 @@ import java.sql.*;
 import java.util.List;
 import java.util.function.Function;
 
+
+/**
+ * 数据库操作抽象类
+ */
 public abstract class BaseRepository {
 
     /**
@@ -29,7 +33,7 @@ public abstract class BaseRepository {
     }
 
     /**
-     * 执行查询并返回结果列表（异常安全）
+     * 执行查询并返回结果列表
      */
     protected <T> DatabaseResult<List<T>> executeQuery(String sql,
                                                        Function<ResultSet, T> mapper,
@@ -61,7 +65,7 @@ public abstract class BaseRepository {
     }
 
     /**
-     * 执行插入操作，返回自增ID（异常安全）
+     * 执行插入操作，返回自增ID
      */
     protected DatabaseResult<Long> executeInsert(String sql, Object... params) {
         return safeExecute(() -> {
@@ -95,7 +99,7 @@ public abstract class BaseRepository {
     }
 
     /**
-     * 执行更新操作（异常安全）
+     * 执行更新操作
      */
     public DatabaseResult<Integer> executeUpdate(String sql, Object... params) {
         return safeExecute(() -> {
@@ -118,7 +122,7 @@ public abstract class BaseRepository {
     }
 
     /**
-     * 执行查询返回单个值（异常安全）
+     * 执行查询返回单个值
      */
     protected <T> DatabaseResult<T> executeQuerySingle(String sql,
                                                        Function<ResultSet, T> mapper,

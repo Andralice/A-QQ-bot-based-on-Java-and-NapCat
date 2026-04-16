@@ -1,6 +1,6 @@
 package com.start.repository;
 
-// 临时定义（建议替换为你自己的 Result）
+// 定义结果类
 class Result<T> {
     private final boolean success;
     private final T data;

@@ -1,6 +1,18 @@
 // util/DatabaseErrorHandler.java
 package com.start.util;
+import java.sql.Connection;
+import java.sql.SQLException;
 
+/**
+ * 数据库错误处理工具类
+ * <p>
+ * 提供统一的数据库异常捕获与处理机制，将底层技术异常转换为对用户友好的提示信息。
+ * 同时提供数据库连接状态的检测功能，用于健康检查或前置校验。
+ * </p>
+ *
+ * @author Lingma
+ * @version 1.0
+ */
 public class DatabaseErrorHandler {
 
     /**

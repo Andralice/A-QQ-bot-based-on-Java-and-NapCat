@@ -1,6 +1,5 @@
 package com.start.handler;
 
-import com.start.agent.UserAffinityTool;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.start.Main;
 import com.start.config.DatabaseConfig;
@@ -14,6 +13,10 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 
+
+/**
+ * 消息处理注册中心
+ */
 public class HandlerRegistry {
     private static final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
     private static final List<MessageHandler> handlers = new ArrayList<>();
@@ -28,7 +31,7 @@ public class HandlerRegistry {
         handlers.add(new HelloHandler());
         handlers.add(new LuckHandler());
         handlers.add(new JokeHandler());
-
+        handlers.add(new ReminderHandler());
         handlers.add(new SanjiaoHandler());
         handlers.add(new DailyProfessionHandler());
         handlers.add(new DailyCpHandler());

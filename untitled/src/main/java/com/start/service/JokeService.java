@@ -12,6 +12,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 
+/**
+ * 笑话服务类
+ * <p>
+ * 提供从外部 API 获取随机笑话的功能。
+ * 支持单段式笑话（single）和双段式笑话（twopart，包含铺垫和 punchline）。
+ * 使用 Java 11+ 的 HttpClient 进行网络请求，并使用 Jackson 处理 JSON 响应。
+ * </p>
+ */
 public class JokeService {
     private static final Logger logger = LoggerFactory.getLogger(JokeService.class);
     private static final String JOKE_API_URL = "https://v2.jokeapi.dev/joke/Any?safe-mode";

@@ -1,12 +1,32 @@
 
 package com.start.service;
 
+import lombok.extern.slf4j.Slf4j;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.CompletableFuture;
 import java.util.UUID;
+/**
+ * 网页截图服务类
+ * <p>
+ * 该服务负责通过调用外部 Python 脚本 ({@code screenshot.py}) 来执行网页截图任务。
+ * 主要功能包括：
+ * <ul>
+ *     <li>异步执行截图任务，避免阻塞主线程。</li>
+ *     <li>动态生成唯一的输出文件路径，防止并发冲突。</li>
+ *     <li>自动清理生成的临时图片文件，节省磁盘空间。</li>
+ *     <li>捕获并处理 Python 脚本执行过程中的错误。</li>
+ * </ul>
+ * </p>
+ * <p>
+ * 注意：此服务依赖于系统中安装的 Python 环境以及位于 JAR 包同级目录下的 {@code screenshot.py} 脚本。
+ * </p>
+ *
+ * @author Lingma
+ * @version 1.0
+ */
 //✅截图服务（已完成）
 public class WebScreenshotService {
 

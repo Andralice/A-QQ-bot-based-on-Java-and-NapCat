@@ -11,7 +11,7 @@ import static com.start.config.DatabaseConfig.getConnection;
 public class MessageRepository extends BaseRepository {
 
     /**
-     * 保存消息（异常安全）
+     * 保存消息
      */
     public DatabaseResult<Long> saveMessage(Map<String, Object> data) {
         return safeExecute(() -> {

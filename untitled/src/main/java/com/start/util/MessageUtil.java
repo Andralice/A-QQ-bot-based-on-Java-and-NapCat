@@ -8,6 +8,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
+
+/**
+ * 消息处理工具类
+ * <p>
+ * 提供针对 QQ 机器人消息的解析与提取功能，支持 JSON 格式（OneBot v11 标准）
+ * 和 CQ 码字符串格式的消息处理。主要功能包括：
+ * <ul>
+ *     <li>从结构化 JSON 消息或 CQ 码字符串中提取纯文本内容</li>
+ *     <li>从 JSON 消息段中提取被 @ 的用户 QQ 号列表</li>
+ *     <li>判断消息是否 @ 了指定用户</li>
+ * </ul>
+ * </p>
+ *
+ * @author Lingma
+ */
 public class MessageUtil {
     private static final Logger logger = LoggerFactory.getLogger(MessageUtil.class);
 

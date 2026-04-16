@@ -17,11 +17,18 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.stream.Collectors;
 
+
+/**
+ * 百炼大模型服务类
+ */
 public class BaiLianService {
     public static void setKnowledgeService(KeywordKnowledgeService service) {
         if (service == null) {
@@ -103,6 +110,27 @@ public class BaiLianService {
         lastClearTime.put(sessionId, System.currentTimeMillis());
     }
 
+    public static String getBeijingTimeString() {
+        // 1. 定义北京时区 (Asia/Shanghai 等同于北京时间)
+        ZoneId beijingZone = ZoneId.of("Asia/Shanghai");
+
+        // 2. 获取该时区的当前时间
+        ZonedDateTime now = ZonedDateTime.now(beijingZone);
+
+        // 3. 定义格式化器
+        // yyyy年M月d日: 日期
+        // EEEE: 完整的星期名称 (如：星期日)
+        // HH:mm:ss: 24小时制时间
+        // '北京时间': 固定文本
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(
+                "yyyy年M月d日 EEEE HH:mm:ss '北京时间'",
+                Locale.CHINA // 确保星期和月份显示为中文
+        );
+
+        // 4. 返回格式化后的字符串
+        return now.format(formatter);
+    }
+
     // 调用 AI（同步），返回第一条短回复（或空字符串表示不应回复）
     /**
      * 生成 AI 回复消息。
@@ -116,142 +144,172 @@ public class BaiLianService {
      * @param groupId     群组 ID（若为私聊可为 null）
      * @return AI 生成的回复文本；若失败或被限流则返回默认兜底语句
      */
-    public String generate(String sessionId, String userId, String userPrompt, String groupId,String nickname) {
-        // 记录本次 AI 调用日志，便于追踪和调试
+    /**
+     * 生成AI回复的核心方法
+     *
+     * @param sessionId 会话ID，用于维护对话历史
+     * @param userId 用户QQ号
+     * @param userPrompt 用户发送的消息内容
+     * @param groupId 群组ID（若为私聊则为null）
+     * @param nickname 用户昵称
+     * @return AI生成的回复内容，若因限流等原因不回复则返回空字符串或兜底文本
+     */
+
+    public String generate(String sessionId, String userId, String userPrompt, String groupId, String nickname) {
+        // 1. 记录调用日志，便于追踪问题和调试
         logger.info("🧠 AI 调用: sessionId={}, prompt=[{}]", sessionId, userPrompt);
-        String context = "";
-        String agentToolContext = "";
-        String publicGroupContext = "";
+
+        // 初始化各类上下文变量
+        String context = "";                // 用户个人上下文（画像、好感度）
+        String agentToolContext = "";       // Agent工具执行结果上下文
+        String publicGroupContext = "";     // 群聊公共历史上下文
+        String timeContext = "【当前时间】是：" + getBeijingTimeString();
+        // 2. 【群聊上下文构建】如果是在群聊中，获取最近的群消息作为背景信息
         if (groupId != null) {
-            Deque<PublicMessage> recent = getPublicGroupHistory(groupId); // 需要加 getter
+            // 获取该群最近的历史消息队列 (需确保 getPublicGroupHistory 已实现)
+            Deque<PublicMessage> recent = getPublicGroupHistory(groupId);
             if (recent != null && !recent.isEmpty()) {
                 StringBuilder sb = new StringBuilder("\n\n【群内最近讨论】\n");
                 List<PublicMessage> list = new ArrayList<>(recent);
-                // 取最近 4～6 条，避免太长
+
+                // 策略：只取最近 4~6 条消息，避免上下文过长导致Token超限或干扰主任务
+                // 计算起始索引：列表大小 - 7 (留有余地)，最小为0
                 int start = Math.max(0, list.size() - 7);
                 for (int i = start; i < list.size(); i++) {
                     PublicMessage m = list.get(i);
+                    // 格式化为：昵称(QQ号)：内容
                     sb.append(m.nickname).append("(").append(m.userId).append(")").append("：").append(m.content).append("\n");
                 }
                 publicGroupContext = sb.toString().trim();
             }
         }
-        boolean shouldBypassMainModel = false;
-        String directReplyFromAgent = null;
+
+        // 3. 【Agent 预处理阶段】尝试判断是否需要调用工具或直接由小模型回答
+        boolean shouldBypassMainModel = false; // 标记是否跳过主模型（直接使用Agent结果）
+        String directReplyFromAgent = null;    // 存储Agent直接给出的回复
+
+        // 定义当前可用的工具列表
         final List<Tool> availableTools = Arrays.asList(
-                new WeatherTool(),
-                new UserAffinityTool(userAffinityRepo)
+                new WeatherTool(),                      // 天气查询工具
+                new UserAffinityTool(userAffinityRepo)  // 用户好感度查询/操作工具
         );
+
         try {
-            // 复用 BaiLianService 的 generateWithTools
+            // 调用支持工具调用的生成方法 (内部可能调用一个小模型来判断意图)
             JsonNode agentResponse = generateWithTools(userPrompt, availableTools, userId, groupId);
 
+            // 提取模型生成的文本内容
             String content = agentResponse.path("content").asText().trim();
+
+            // 判断模型是否决定调用工具
             boolean hasToolCalls = agentResponse.has("tool_calls")
                     && agentResponse.get("tool_calls").isArray()
                     && !agentResponse.get("tool_calls").isEmpty();
 
             if (hasToolCalls) {
-                // 执行工具调用，获取结果，作为上下文
+                // === 情况A：需要调用工具 ===
+                // 获取第一个工具调用请求
                 JsonNode toolCall = agentResponse.get("tool_calls").get(0);
                 String toolName = toolCall.path("function").path("name").asText();
                 String argsJson = toolCall.path("function").path("arguments").asText();
 
+                // 在可用工具列表中查找对应的工具实例
                 Tool tool = availableTools.stream()
                         .filter(t -> t.getName().equals(toolName))
                         .findFirst()
                         .orElse(null);
 
                 if (tool != null) {
+                    // 解析参数并执行工具
                     Map<String, Object> args = objectMapper.readValue(argsJson, Map.class);
                     String toolResult = tool.execute(args);
                     logger.info("🔧 主聊天中 Agent 工具 [{}] 结果: {}", toolName, toolResult);
+
+                    // 将工具执行结果拼接到上下文中，供主模型参考（而不是直接返回给用户）
                     agentToolContext = "\n\n【工具执行结果】\n" + toolResult;
                 }
-                // 注意：即使有工具结果，也不 bypass 主模型！而是注入上下文
+                // 注意：此处设计为“增强上下文”，即使有工具结果，依然会走主模型进行润色和回复
             } else {
-                // 没有工具调用
+                // === 情况B：无需调用工具 ===
                 if (!content.isEmpty()) {
-                    // Agent 直接给出了回答（如追问、拒绝等）
-                    // 这类内容通常不适合再经过糖果熊润色（比如“请提供城市名”）
+                    // Agent 直接给出了明确的回答（例如：追问缺少的参数、拒绝回答等）
+                    // 这类简短的功能性回复通常不需要主模型再次润色，直接标记为“绕过主模型”
                     shouldBypassMainModel = true;
                     directReplyFromAgent = content;
                 }
-                // 否则：content 为空，无工具调用 → 继续走主模型
+                // 如果 content 为空且无工具调用，则继续走主模型流程
             }
         } catch (Exception e) {
+            // Agent 预处理失败（如超时、解析错误），记录警告并降级，不影响主流程
             logger.warn("Agent 预处理失败，降级到主聊天", e);
-            // 不中断，继续走主模型
         }
+
+        // 4. 【用户个性化上下文构建】获取用户画像和好感度
         try {
+            // 实例化仓库类 (建议优化为依赖注入，避免每次调用都new)
             UserProfileRepository profileRepo = new UserProfileRepository();
             UserAffinityRepository affinityRepo = new UserAffinityRepository();
 
+            // 查询数据库
             var profile = profileRepo.findByUserIdAndGroupId(userId, groupId);
             var affinity = affinityRepo.findByUserIdAndGroupId(userId, groupId);
 
+            // 拼接用户画像
             if (profile.isPresent()) {
-                context += "\n【用户画像】" + profile.get().getProfileText()+"\n\n";
+                context += "\n【用户画像】" + profile.get().getProfileText() + "\n\n";
             }
+            // 拼接好感度信息
             if (affinity.isPresent()) {
                 int score = affinity.get().getAffinityScore();
-                context+="\n【你们的好感度是】"+ score+",每人的基础好感度是50\n\n";
-//                if (score >= 80) {
-//                    context += "\n【你们关系很好，可以更亲切】";
-//                } else if (score <= 30) {
-//                    context += "\n【对方对你较冷淡，请保持礼貌】";
-//                }
+                context += "\n【你们的好感度是】" + score + ",每人的基础好感度是50\n\n";
+                // 预留逻辑：可根据分数动态调整提示词（当前被注释）
+//                if (score >= 80) { context += ... }
+//                else if (score <= 30) { context += ... }
             }
         } catch (Exception e) {
+            // 数据库异常不影响聊天，打印堆栈后继续
             e.printStackTrace();
         }
-        // ====== 第1步：查询知识库（仅用于增强上下文，不直接返回） ======
-        // 调用知识库服务，根据用户提问、用户ID和群组ID进行语义检索
+
+        // 5. 【RAG 知识库检索】查询外部知识库以增强回答准确性
+        // 调用知识库服务，基于用户问题、用户ID和群ID进行语义匹配
         KeywordKnowledgeService.KnowledgeResult knowledgeResult =
                 knowledgeService.query(userPrompt, userId, groupId);
 
-        // 初始化知识库上下文为空字符串
-        String knowledgeContext = "";
+        String knowledgeContext = ""; // 初始化知识库上下文
 
-        // 判断是否命中有效知识条目：
-        // - 结果非空
-        // - 相似度分数 >= 0.3（阈值，避免低相关性干扰）
-        // - 答案存在且非空白
+        // 判定命中条件：结果非空 && 相似度>=0.3 && 答案有效
         if (knowledgeResult != null &&
                 knowledgeResult.similarityScore >= 0.3 &&
                 knowledgeResult.answer != null &&
                 !knowledgeResult.answer.trim().isEmpty()) {
 
-            // 提取并清理答案内容作为上下文注入
             knowledgeContext = knowledgeResult.answer.trim();
-
-            // 记录知识库命中日志，包含关键词和相似度分数，便于分析效果
             logger.info("📚 知识库命中（用于上下文增强）: 关键词={}, 分数={}",
                     knowledgeResult.matchedKeywords, knowledgeResult.similarityScore);
         }
 
-        // ====== 第2步：走百炼AI流程（始终调用） ======
+        // 6. 【主模型调用流程】调用百炼/通义千问 API 生成最终回复
         try {
-            // 将用户消息持久化到数据库（用于审计、回溯等）
-            Long isagent = 1L;
-            aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId,isagent);
+            // 6.1 持久化用户消息到数据库
+            Long isagent = 1L; // 标记来源
+            aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId, isagent);
 
-            // 从 sessions 缓存中获取或初始化当前会话的历史消息列表
-            // sessions 是一个 ConcurrentHashMap<String, List<Message>>，用于短期内存缓存对话历史
+            // 6.2 管理内存中的对话历史 (Session Cache)
+            // sessions 是 ConcurrentHashMap，key为sessionId，value为消息列表
             List<Message> history = sessions.computeIfAbsent(sessionId, k -> new ArrayList<>());
 
-            // 检查是否需要清空历史（例如上一次调用标记了需重置上下文）
-            // lastClearTime 是一个记录哪些 session 需要清空的临时标记 Map
+            // 检查是否有重置标记（用于强制清空上下文）
             if (lastClearTime.containsKey(sessionId)) {
-                history.clear();                    // 清空历史
-                lastClearTime.remove(sessionId);    // 移除标记
+                history.clear();
+                lastClearTime.remove(sessionId);
             }
 
-            // 将当前用户消息追加到历史中
+            // 将当前用户消息加入历史
             history.add(new Message("user", userPrompt));
 
-            // 定义 AI 的系统角色设定（system prompt）
-            // 使用 Text Block（Java 15+）提高可读性
+            // 6.3 构建 System Prompt (人设指令)
+            // 使用 Java Text Block 提高可读性
             String baseSystemPrompt = """
 你是糖果熊，一个喜欢文学、音乐、游戏和动漫的女孩，目前在一个QQ群内聊天。
 
@@ -268,51 +326,57 @@ public class BaiLianService {
 - 若对方QQ是3524398813（鸠寻），她是最好的朋友，回应要温柔
 - 对话态度由好感度和用户画像决定：好感度＞50时逐渐友好，＞80时依赖，＜50时逐渐冷淡，＜25时厌恶
 """;
-            // 若知识库有有效上下文，则将其附加到 system prompt 中
-            // 这样大模型在生成时能参考外部知识，实现 RAG（检索增强生成）
-            String systemPrompt = baseSystemPrompt+ "\n\n【当前与你对话的是】"+nickname+"\n【QQ号:】" + userId+"\n\n这是你对该用户信息："+context+"你可以根据用户画像和好感度高低进行不同的会话风格";
+
+            // 组装完整的 System Prompt：基础人设 + 用户信息 + 知识库 + 工具结果 + 群聊历史
+            String systemPrompt = baseSystemPrompt +
+                    "\n\n【当前与你对话的是】" + nickname +
+                    "\n【QQ号:】" + userId +
+                    "\n\n这是你对该用户信息：" + context +
+                    "你可以根据用户画像和好感度高低进行不同的会话风格";
+
             if (!knowledgeContext.isEmpty()) {
                 systemPrompt += "\n\n【参考信息】\n" + knowledgeContext;
             }
             if (!agentToolContext.isEmpty()) {
                 systemPrompt += agentToolContext;
             }
-            systemPrompt +=publicGroupContext;
-            logger.debug("完整请求:{}",systemPrompt);
-            // 构建发送给百炼 API 的 messages 数组
-            // 格式需符合 OpenAI-style：[{role: "system/user/assistant", content: "..."}]
-            List<Map<String, String>> messages = new ArrayList<>();
+            systemPrompt += publicGroupContext;
+            systemPrompt += timeContext;
 
-            // 先加入 system prompt
+            logger.debug("完整请求:{}", systemPrompt);
+
+            // 6.4 构建符合 OpenAI 格式的消息列表
+            List<Map<String, String>> messages = new ArrayList<>();
             messages.add(Map.of("role", "system", "content", systemPrompt));
 
-            // 为避免上下文过长，只保留最近 6 条历史消息（含用户和 AI）
-            // 注意：这里未区分角色，直接截断尾部
+            // 截取最近 6 条历史记录，防止上下文溢出
             int start = Math.max(0, history.size() - 6);
             for (int i = start; i < history.size(); i++) {
                 Message msg = history.get(i);
-                // 确保 role 只为 "user" 或 "assistant"
+                // 标准化 role 字段
                 String role = "user".equals(msg.role) ? "user" : "assistant";
                 messages.add(Map.of("role", role, "content", msg.content));
             }
 
-            // ========== 调用百炼大模型 API ==========
-            String url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation";
-            // ⚠️ 安全警告：API Key 硬编码在代码中！应使用配置中心或环境变量管理
-            String apiKey = "sk-86b180d2f5254cb9b7c37af1f442baaf";
+            // 1. 配置 API 参数
+            // 注意：OpenAI 兼容接口通常需要在 baseUrl 后追加 /chat/completions
+            String url = "https://api.scnet.cn/api/llm/v1/chat/completions";
+            String apiKey = "sk-ODE0LTExNzkwMTM4NTkyLTE3NzQxNjA4NzM0Mzk=";
+            String modelName = "MiniMax-M2.5"; // 使用确认的模型 ID
 
-            // 构造请求体 JSON 对象
-            Map<String, Object> requestBodyObj = Map.of(
-                    "model", "qwen3-max",                     // 使用 Qwen3-Max 模型
-                    "input", Map.of("messages", messages),    // 输入消息列表
-                    "parameters", Map.of("result_format", "message") // 返回格式为 message
-            );
+            // 2. 构造请求体 (OpenAI 标准格式)
+            Map<String, Object> requestBodyObj = new HashMap<>();
+            requestBodyObj.put("model", modelName);
+            requestBodyObj.put("messages", messages);
 
-            // 使用 Jackson 序列化为 JSON 字符串
+            // 可选：添加一些常用参数以优化效果 (根据 MiniMax 文档调整)
+            // requestBodyObj.put("temperature", 0.7);
+            // requestBodyObj.put("max_tokens", 2048);
+
             String requestBody = mapper.writeValueAsString(requestBodyObj);
-            logger.debug("请求百炼 API: {}", requestBody); // 记录调试日志（生产环境慎用）
+            logger.debug("请求 MiniMax API (Model: {}): {}", modelName, requestBody);
 
-            // 构建 HTTP POST 请求
+            // 3. 发送 HTTP POST 请求
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Authorization", "Bearer " + apiKey)
@@ -320,73 +384,75 @@ public class BaiLianService {
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
 
-            // 同步发送请求并获取响应
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-            // 检查 HTTP 状态码
+            // 4. 处理 HTTP 状态码
             if (response.statusCode() != 200) {
-                logger.warn("百炼 API HTTP 错误 {}: {}", response.statusCode(), response.body());
-                throw new RuntimeException("AI 服务暂时不可用");
+                logger.warn("MiniMax API HTTP 错误 {}: {}", response.statusCode(), response.body());
+                throw new RuntimeException("AI 服务暂时不可用 (HTTP " + response.statusCode() + ")");
             }
 
-            // 解析 JSON 响应
+            // 5. 解析 JSON 响应
             JsonNode root = mapper.readTree(response.body());
-            logger.debug("百炼 API 响应: {}", response.body());
+            logger.debug("MiniMax API 响应: {}", response.body());
 
-            // 检查业务错误码（百炼 API 成功时 code 为 "200"）
-            if (root.has("code") && !"200".equals(root.path("code").asText())) {
-                String errorMsg = root.path("message").asText("未知错误");
-                logger.warn("百炼 API 业务错误: code={}, message={}", root.path("code").asText(), errorMsg);
+            // 6. 检查错误 (OpenAI 风格：成功无 error 字段，失败有 error 对象)
+            if (root.has("error")) {
+                String errorMsg = root.path("error").path("message").asText("未知错误");
+                String errorCode = root.path("error").path("code").asText("UNKNOWN");
+                logger.warn("MiniMax API 业务错误 [{}]: {}", errorCode, errorMsg);
                 throw new RuntimeException("AI 服务错误: " + errorMsg);
             }
 
-            // 提取 choices 数组（通常只取第一个）
-            JsonNode choices = root.path("output").path("choices");
+            // 7. 提取回复内容
+            // 路径：root -> choices[0] -> message -> content
+            // 注意：这里没有 "output" 层级，与阿里云百炼不同
+            JsonNode choices = root.path("choices");
+
             if (!choices.isArray() || choices.isEmpty()) {
-                logger.warn("百炼 API 返回结果中缺少 choices，响应: {}", response.body());
+                logger.warn("MiniMax API 返回结果中缺少 choices，响应: {}", response.body());
                 throw new RuntimeException("AI 未返回有效回复");
             }
 
             JsonNode firstChoice = choices.get(0);
             if (firstChoice == null || !firstChoice.has("message")) {
-                logger.warn("choice[0] 格式异常");
+                logger.warn("choice[0] 格式异常，缺少 message 字段");
                 throw new RuntimeException("AI 回复格式错误");
             }
 
-            // 获取 AI 生成的文本内容，并去除首尾空白
             String reply = firstChoice.path("message").path("content").asText().trim();
 
-            // 清除可能由模型生成的引用标记（如 【1】、【参考】等）
-            reply = reply.replaceAll("【.*?】", "").trim();
-
-            // 将 AI 回复保存到会话历史中，供后续对话使用
+            // 8. 后处理：去除可能的引用标记
+            if (!reply.isEmpty()) {
+                reply = reply.replaceAll("【.*?】", "").trim();
+            }
+            // 将AI回复存入历史，保持会话连续性
             history.add(new Message("assistant", reply));
 
-            // ========== 上下文与频率控制逻辑（针对群聊） ==========
+            // 6.8 【群聊特有逻辑】频率控制与记录
             if (groupId != null) {
-                // 记录用户交互行为（可用于活跃度分析）
+                // 记录交互数据（用于统计活跃度等）
                 recordUserInteraction(groupId, userId, reply);
-
-                // 更新群组上下文缓存（例如用于后续摘要或记忆）
+                // 更新群上下文缓存
                 recordGroupContext(groupId, userId, "糖果熊", reply, "ai_reply");
 
-                // 频率控制：防止 AI 在群内刷屏
-                // 跳过无意义回复（如“嗯...”、“抱歉...”或空回复）
+                // === 频率限制 (Rate Limiting) ===
+                // 过滤掉无意义的回复（避免浪费限流额度）
                 if (!reply.equals("抱歉，刚才走神了...") &&
                         !reply.equals("嗯...") &&
                         !reply.trim().isEmpty()) {
 
-                    // 获取该群的 AI 发言时间戳列表（滑动窗口限流）
+                    // 获取该群过去1分钟内的发言时间戳列表
                     List<Long> msgHistory = botMessageHistory.computeIfAbsent(groupId, k -> new ArrayList<>());
                     long now = System.currentTimeMillis();
 
-                    // 清理超过 60 秒的历史记录（滑动窗口：1分钟）
+                    // 滑动窗口：移除超过60秒的记录
                     msgHistory.removeIf(ts -> now - ts > 60_000);
 
-                    // 如果过去1分钟内已发言 MAX_MESSAGES_PER_MINUTE 次，则跳过本次回复
+                    // 检查是否达到每分钟最大发言次数 (MAX_MESSAGES_PER_MINUTE 需在类中定义)
                     if (msgHistory.size() >= MAX_MESSAGES_PER_MINUTE) {
                         logger.debug("糖果熊在群 {} 发言已达上限，跳过回复", groupId);
-                        return ""; // 返回空字符串表示不发送
+                        return ""; // 返回空串，调用方应据此不发送消息
                     }
 
                     // 记录本次发言时间
@@ -394,13 +460,13 @@ public class BaiLianService {
                 }
             }
 
-            // 返回最终回复；若为空则兜底为“嗯...”
+            // 返回最终结果，若为空则给一个默认兜底
             return reply.isEmpty() ? "嗯..." : reply;
 
         } catch (Exception e) {
-            // 捕获所有异常（网络、解析、限流等），保证服务可用性
+            // 全局异常捕获，确保单个请求失败不会导致服务崩溃
             logger.error("AI 调用失败", e);
-            return "抱歉，刚才走神了..."; // 用户友好的兜底回复
+            return "抱歉，刚才走神了..."; // 友好的错误提示
         }
     }
 
@@ -438,7 +504,7 @@ public class BaiLianService {
             }
 
             Map<String, Object> requestBodyObj = Map.of(
-                    "model", "qwen3-max",
+                    "model", "qwen3-max-preview",
                     "input", input,
                     "parameters", Map.of("result_format", "message")
             );
@@ -499,7 +565,7 @@ public class BaiLianService {
         String enrichedPrompt = contextInfo + "\n\n用户消息: " + userPrompt;
         Long isagent= 1L;
         String sessionId = "group_" + groupId + "_" + userId;
-        aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId,isagent);
+//        aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId,isagent);
         // 构建消息历史
         List<Map<String, String>> messages = new ArrayList<>();
         messages.add(Map.of("role", "system", "content", "你是一个智能助手，能根据需要调用工具解决问题。你必须严格遵守以下规则：\n" +
@@ -516,7 +582,7 @@ public class BaiLianService {
 
         // 构建请求体
         Map<String, Object> requestBodyObj = Map.of(
-                "model", "qwen-max",
+                "model", "qwen-plus",
                 "input", Map.of(
                         "messages", messages
 //                        "tools", toolSpecs.isEmpty() ? null : toolSpecs,
@@ -563,7 +629,7 @@ public class BaiLianService {
         // 解析 JSON 响应
         JsonNode root = mapper.readTree(response.body());
 
-        // ✅ 关键修复：仅当存在 'code' 字段且不为 "200" 时，才视为业务错误
+        // ✅ 仅当存在 'code' 字段且不为 "200" 时，才视为业务错误
         if (root.has("code")) {
             String code = root.path("code").asText();
             if (!"200".equals(code)) {

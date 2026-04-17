@@ -13,18 +13,16 @@ public class HelloHandler implements MessageHandler {
     @Override
     public boolean match(JsonNode msg) {
         String messageType = msg.path("message_type").asText();
-        long selfId = msg.path("self_id").asLong();
         if ("private".equals(messageType)) {
             String text = MessageUtil.extractPlainText(msg.path("message"));
-            return !text.trim().isEmpty() && text.contains("你好");
-        }
-        else if ("group".equals(messageType)) {
+            // 私聊忽略@，必须严格等于"你好"（去除首尾空白后）
+            return "你好".equals(text.trim());
+        } else if ("group".equals(messageType)) {
             String text = MessageUtil.extractPlainText(msg.path("message"));
             long botQq = BotConfig.getBotQq();
-            // 从配置读取机器人QQ
-            // 必须同时满足：1. 被 @；2. 包含“你好”
+            // 群聊必须同时满足：1. 被 @；2. 文本严格等于"你好"（去除首尾空白后）
             return MessageUtil.isAt(msg.path("message"), botQq) &&
-                    text.contains("你好");
+                    "你好".equals(text.trim());
         }
         return false;
     }

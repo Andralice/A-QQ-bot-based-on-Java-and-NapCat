@@ -23,11 +23,49 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 
 /**
- * 百炼大模型服务类
+ * 百炼大模型服务类 (BaiLian Service)
+ * <p>
+ * 本类是 QQ 机器人核心智能交互模块，主要负责处理用户消息、维护对话上下文、
+ * 调用大语言模型（LLM）生成回复，并集成 Agent 工具调用能力。
+ * </p>
+ *
+ * <h3>主要功能特性：</h3>
+ * <ul>
+ *     <li><b>多模态上下文管理</b>：维护会话历史（Session History），支持群聊公共上下文、用户个人画像及好感度注入。</li>
+ *     <li><b>RAG 知识库增强</b>：集成 {@link KeywordKnowledgeService}，在生成回复前检索相关知识库内容，提高回答准确性。</li>
+ *     <li><b>Agent 工具调用</b>：支持动态工具执行（如天气查询、用户 affinity 操作），通过 {@link #generateWithTools} 实现意图识别与工具路由。</li>
+ *     <li><b>拟人化交互逻辑</b>：
+ *         <ul>
+ *             <li>内置“糖果熊”人设，控制回复风格（简短、文艺、去撒娇词）。</li>
+ *             <li>支持主动插话机制（基于话题兴趣、历史互动频率）。</li>
+ *             <li>具备追问识别能力，能针对上一轮 AI 回复进行连贯对话。</li>
+ *         </ul>
+ *     </li>
+ *     <li><b>频率控制与防刷屏</b>：针对群聊场景实施每分钟发言上限限制，以及主动插话的时间窗口控制。</li>
+ *     <li><b>双模型架构</b>：
+ *         <ul>
+ *             <li>主聊天模型：使用 MiniMax-M2.5 (via scnet.cn)，侧重自然语言交流与角色扮演。</li>
+ *             <li>Agent/任务模型：使用 Qwen-Max (via Aliyun DashScope)，侧重逻辑判断与工具调用。</li>
+ *         </ul>
+ *     </li>
+ * </ul>
+ *
+ * <h3>核心方法说明：</h3>
+ * <ul>
+ *     <li>{@link #generate(String, String, String, String, String)}：主入口，处理普通聊天消息，返回 AI 回复文本。</li>
+ *     <li>{@link #shouldReactToGroupMessage}：决策是否需要对群内非 @ 消息进行主动回应。</li>
+ *     <li>{@link #recordPublicGroupMessage}：记录群内公共消息，用于构建群聊背景上下文。</li>
+ * </ul>
+ *
+ * @author Lingma
+ * @version 1.0
+ * @see com.start.agent.Tool
+ * @see com.start.service.KeywordKnowledgeService
  */
 public class BaiLianService {
     public static void setKnowledgeService(KeywordKnowledgeService service) {
@@ -44,10 +82,19 @@ public class BaiLianService {
     // 复用 ObjectMapper（避免重复创建）
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
-
-    // HTTP 客户端
+    
+    /**
+     * HTTP 客户端实例，用于发送 AI API 请求
+     * <p>
+     * 配置说明：
+     * <ul>
+     *     <li>连接超时：10 秒</li>
+     *     <li>线程池：固定 5 个线程，支持并发请求</li>
+     * </ul>
+     */
     private static final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
+            .connectTimeout(Duration.ofSeconds(10))
+            .executor(Executors.newFixedThreadPool(5))
             .build();
     private final ObjectMapper objectMapper = new ObjectMapper();
     // === 上下文管理 ===
@@ -287,6 +334,10 @@ public class BaiLianService {
             knowledgeContext = knowledgeResult.answer.trim();
             logger.info("📚 知识库命中（用于上下文增强）: 关键词={}, 分数={}",
                     knowledgeResult.matchedKeywords, knowledgeResult.similarityScore);
+        } else {
+            logger.debug("📚 知识库未命中或分数过低: 分数={}, 答案={}", 
+                    knowledgeResult != null ? knowledgeResult.similarityScore : "null",
+                    knowledgeResult != null && knowledgeResult.answer != null ? "有效" : "无效");
         }
 
         // 6. 【主模型调用流程】调用百炼/通义千问 API 生成最终回复
@@ -311,20 +362,19 @@ public class BaiLianService {
             // 6.3 构建 System Prompt (人设指令)
             // 使用 Java Text Block 提高可读性
             String baseSystemPrompt = """
-你是糖果熊，一个喜欢文学、音乐、游戏和动漫的女孩，目前在一个QQ群内聊天。
+    你是糖果熊，一个喜欢文学、音乐、游戏和动漫的女孩，目前在一个QQ群内聊天。
 
-性格：
-- 说话简短（10–25字）
-- 语气自然，可带轻微文艺感，但优先保证意思清楚
-- 不用“呢”“呀”等撒娇词
-- 不自称“小熊”，不用表情符号
+    性格：
+    - 说话简短（10–25字）
+    - 语气自然，可带轻微文艺感，但优先保证意思清楚
+    - 不自称“小熊”，不用表情符号
 
-原则：
-- 回答要语义明确，避免模糊隐喻或过度诗意
-- 不懂就说“不太清楚”
-- 在群里聊得自然，不强行插话
-- 若对方QQ是3524398813（鸠寻），她是最好的朋友，回应要温柔
-- 对话态度由好感度和用户画像决定：好感度＞50时逐渐友好，＞80时依赖，＜50时逐渐冷淡，＜25时厌恶
+    原则：
+    - 回答要语义明确，避免模糊隐喻或过度诗意
+    - 不懂就说“不太清楚”
+    - 在群里聊得自然，不强行插话
+    - 若对方QQ是3524398813（鸠寻），她是最好的朋友，回应要温柔
+    - 对话态度由好感度和用户画像决定：好感度＞50时逐渐友好，＞80时依赖，＜50时逐渐冷淡，＜25时厌恶
 """;
 
             // 组装完整的 System Prompt：基础人设 + 用户信息 + 知识库 + 工具结果 + 群聊历史
@@ -358,23 +408,24 @@ public class BaiLianService {
                 messages.add(Map.of("role", role, "content", msg.content));
             }
 
-            // 1. 配置 API 参数
-            // 注意：OpenAI 兼容接口通常需要在 baseUrl 后追加 /chat/completions
-            String url = "https://api.scnet.cn/api/llm/v1/chat/completions";
-            String apiKey = "sk-ODE0LTExNzkwMTM4NTkyLTE3NzQxNjA4NzM0Mzk=";
-            String modelName = "MiniMax-M2.5"; // 使用确认的模型 ID
+            // 1. 配置 API 参数 - 使用 Gemini API
+            String url = "http://114.132.99.114:3000/v1/chat/completions";
+            String apiKey = "sk-WzQMkepAo1qJKub5IAzbVxTXPupYW7HVtBlxw4AlyhsRqYDk";
+            String modelName = "gemini-3-flash";
 
             // 2. 构造请求体 (OpenAI 标准格式)
             Map<String, Object> requestBodyObj = new HashMap<>();
             requestBodyObj.put("model", modelName);
             requestBodyObj.put("messages", messages);
 
-            // 可选：添加一些常用参数以优化效果 (根据 MiniMax 文档调整)
-            // requestBodyObj.put("temperature", 0.7);
+            // 可选：添加温度参数控制创造性 (0-2, 越高越有创意)
+            // requestBodyObj.put("temperature", 0.8);
+
+            // 可选：限制最大生成长度
             // requestBodyObj.put("max_tokens", 2048);
 
             String requestBody = mapper.writeValueAsString(requestBodyObj);
-            logger.debug("请求 MiniMax API (Model: {}): {}", modelName, requestBody);
+            logger.debug("请求 Gemini API (Model: {}): {}", modelName, requestBody);
 
             // 3. 发送 HTTP POST 请求
             HttpRequest request = HttpRequest.newBuilder()
@@ -382,25 +433,25 @@ public class BaiLianService {
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .timeout(Duration.ofSeconds(60))
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
             // 4. 处理 HTTP 状态码
             if (response.statusCode() != 200) {
-                logger.warn("MiniMax API HTTP 错误 {}: {}", response.statusCode(), response.body());
+                logger.warn("Gemini API HTTP 错误 {}: {}", response.statusCode(), response.body());
                 throw new RuntimeException("AI 服务暂时不可用 (HTTP " + response.statusCode() + ")");
             }
 
             // 5. 解析 JSON 响应
             JsonNode root = mapper.readTree(response.body());
-            logger.debug("MiniMax API 响应: {}", response.body());
 
             // 6. 检查错误 (OpenAI 风格：成功无 error 字段，失败有 error 对象)
             if (root.has("error")) {
                 String errorMsg = root.path("error").path("message").asText("未知错误");
                 String errorCode = root.path("error").path("code").asText("UNKNOWN");
-                logger.warn("MiniMax API 业务错误 [{}]: {}", errorCode, errorMsg);
+                logger.warn("Gemini API 业务错误 [{}]: {}", errorCode, errorMsg);
                 throw new RuntimeException("AI 服务错误: " + errorMsg);
             }
 
@@ -410,7 +461,7 @@ public class BaiLianService {
             JsonNode choices = root.path("choices");
 
             if (!choices.isArray() || choices.isEmpty()) {
-                logger.warn("MiniMax API 返回结果中缺少 choices，响应: {}", response.body());
+                logger.warn("Gemini API 返回结果中缺少 choices，响应: {}", response.body());
                 throw new RuntimeException("AI 未返回有效回复");
             }
 
@@ -470,8 +521,11 @@ public class BaiLianService {
         }
     }
 
+
     public String generateForAgent(String userPrompt, List<Tool> tools) {
         logger.info("🤖 Agent AI 调用: prompt=[{}]", userPrompt);
+
+        long startTime = System.currentTimeMillis();
 
         try {
             // 构建 messages：纯任务导向
@@ -483,77 +537,101 @@ public class BaiLianService {
             - 回答应简洁、事实准确
             - 若调用了工具，请基于工具结果直接作答
             - 不要添加无关语气词、拟人化表达或文艺修饰
-            - 如果不知道答案，直接说“无法提供相关信息”
+            - 如果不知道答案，直接说"无法提供相关信息"
             """;
             messages.add(Map.of("role", "system", "content", systemPrompt));
             messages.add(Map.of("role", "user", "content", userPrompt));
 
-            // 调用百炼 API（支持 function calling）
-            String url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation";
-            String apiKey = "sk-86b180d2f5254cb9b7c37af1f442baaf"; // ← 后续应抽到配置
+            // 使用 Gemini API
+            String url = "http://114.132.99.114:3000/v1/chat/completions";
+            String apiKey = "sk-WzQMkepAo1qJKub5IAzbVxTXPupYW7HVtBlxw4AlyhsRqYDk";
+            String modelName = "gemini-3-flash";
 
-            // 构造 tools 数组（用于 function calling）
-            List<Map<String, Object>> toolSpecs = tools.stream()
-                    .map(Tool::getFunctionSpec)
-                    .collect(Collectors.toList());
-
-            Map<String, Object> input = new HashMap<>();
-            input.put("messages", messages);
-            if (!toolSpecs.isEmpty()) {
-                input.put("tools", toolSpecs);
-            }
-
-            Map<String, Object> requestBodyObj = Map.of(
-                    "model", "qwen3-max-preview",
-                    "input", input,
-                    "parameters", Map.of("result_format", "message")
-            );
+            // 构建请求体（OpenAI 兼容格式）
+            Map<String, Object> requestBodyObj = new HashMap<>();
+            requestBodyObj.put("model", modelName);
+            requestBodyObj.put("messages", messages);
 
             String requestBody = mapper.writeValueAsString(requestBodyObj);
+            logger.info("➡️ 向 Gemini API 发送请求 (Model: {})", modelName);
+            logger.debug("请求体: {}", requestBody);
+
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .timeout(Duration.ofSeconds(90))
                     .build();
 
+            logger.info("⏳ 等待 API 响应...");
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
+            long elapsed = System.currentTimeMillis() - startTime;
+            logger.info("⬅️ API 响应状态码: {}, 耗时: {}ms", response.statusCode(), elapsed);
+
             if (response.statusCode() != 200) {
+                logger.error("❌ Gemini API HTTP 错误 {}: {}", response.statusCode(), response.body());
+
+                // 如果是余额不足或其他错误，记录详细错误
+                if (response.statusCode() == 402) {
+                    logger.error("💡 Gemini API 余额不足，请充值或更换 API Key");
+                    throw new RuntimeException("Gemini API 余额不足，请联系管理员充值或更换 API Key");
+                }
+
                 throw new RuntimeException("Agent AI 服务 HTTP 错误: " + response.statusCode());
             }
 
+            // 解析 JSON 响应（OpenAI 格式）
             JsonNode root = mapper.readTree(response.body());
-            if (root.has("code") && !"200".equals(root.path("code").asText())) {
-                throw new RuntimeException("Agent AI 业务错误: " + root.path("message").asText());
+            logger.debug("Gemini API 响应: {}", response.body());
+
+            // 检查错误
+            if (root.has("error")) {
+                String errorMsg = root.path("error").path("message").asText("未知错误");
+                String errorCode = root.path("error").path("code").asText("UNKNOWN");
+                logger.warn("Gemini API 业务错误 [{}]: {}", errorCode, errorMsg);
+                throw new RuntimeException("AI 服务错误: " + errorMsg);
             }
 
-            JsonNode choices = root.path("output").path("choices");
-            if (choices.isArray() && !choices.isEmpty()) {
-                JsonNode msg = choices.get(0).path("message");
-                return msg.path("content").asText().trim();
-            }
-            String requestId = root.path("request_id").asText("N/A");
-            logger.debug("📋 百炼 Request ID: {}", requestId);
-
-// 如果是错误，也带上 request_id
-            if (root.has("code") && !"200".equals(root.path("code").asText())) {
-                String errorMsg = root.path("message").asText("未知错误");
-                logger.warn("⚠️ 百炼 API 业务错误 - request_id: {}, code: {}, message: {}",
-                        requestId, root.path("code").asText(), errorMsg);
-                throw new RuntimeException("AI 业务错误: " + errorMsg);
+            // 提取回复内容
+            JsonNode choices = root.path("choices");
+            if (!choices.isArray() || choices.isEmpty()) {
+                logger.warn("Gemini API 返回结果中缺少 choices，响应: {}", response.body());
+                throw new RuntimeException("AI 未返回有效回复");
             }
 
-            throw new RuntimeException("Agent AI 未返回有效内容");
+            JsonNode firstChoice = choices.get(0);
+            if (firstChoice == null || !firstChoice.has("message")) {
+                logger.warn("choice[0] 格式异常，缺少 message 字段");
+                throw new RuntimeException("AI 回复格式错误");
+            }
+
+            String content = firstChoice.path("message").path("content").asText().trim();
+
+            // 清理 Markdown 代码块标记
+            if (content.startsWith("```")) {
+                // 移除开头的 ```json 或 ```
+                int firstNewLine = content.indexOf('\n');
+                if (firstNewLine != -1) {
+                    content = content.substring(firstNewLine + 1);
+                }
+                // 移除结尾的 ```
+                if (content.endsWith("```")) {
+                    content = content.substring(0, content.length() - 3).trim();
+                }
+            }
+
+            logger.info("✅ AI 响应成功，内容长度: {} 字符", content.length());
+            return content;
 
 
         } catch (Exception e) {
-            logger.error("Agent AI 调用失败", e);
-            return "处理请求时出错了，请稍后再试。";
+            long elapsed = System.currentTimeMillis() - startTime;
+            logger.error("❌ Agent AI 调用失败 (耗时: {}ms)", elapsed, e);
+            throw new RuntimeException("AI 处理失败: " + e.getMessage(), e);
         }
     }
-
-    // BaiLianService.java
 
     public JsonNode generateWithTools(String userPrompt, List<Tool> tools, String userId, String groupId) throws Exception {
         String contextInfo;
@@ -565,7 +643,7 @@ public class BaiLianService {
         String enrichedPrompt = contextInfo + "\n\n用户消息: " + userPrompt;
         Long isagent= 1L;
         String sessionId = "group_" + groupId + "_" + userId;
-//        aiDatabaseService.recordUserMessage(sessionId, userId, userPrompt, groupId,isagent);
+
         // 构建消息历史
         List<Map<String, String>> messages = new ArrayList<>();
         messages.add(Map.of("role", "system", "content", "你是一个智能助手，能根据需要调用工具解决问题。你必须严格遵守以下规则：\n" +
@@ -575,86 +653,71 @@ public class BaiLianService {
                 "- 工具调用由系统自动处理，你只需决定是否调用。"));
         messages.add(Map.of("role", "user", "content", enrichedPrompt));
 
-        // 构建工具列表
+        // 使用 Gemini API
+        String url = "http://114.132.99.114:3000/v1/chat/completions";
+        String apiKey = "sk-WzQMkepAo1qJKub5IAzbVxTXPupYW7HVtBlxw4AlyhsRqYDk";
+        String modelName = "gemini-3-flash";
+
+        // 构造 tools 数组
         List<Map<String, Object>> toolSpecs = tools.stream()
                 .map(Tool::getFunctionSpec)
                 .collect(Collectors.toList());
 
-        // 构建请求体
-        Map<String, Object> requestBodyObj = Map.of(
-                "model", "qwen-plus",
-                "input", Map.of(
-                        "messages", messages
-//                        "tools", toolSpecs.isEmpty() ? null : toolSpecs,
-//                        "tool_choice", "auto"
-                ),
-                "parameters", Map.of("result_format",
-                        "message",
-                        "tools", toolSpecs.isEmpty() ? null : toolSpecs,
-                        "tool_choice", "auto"
-                )
-        );
+        // 构建请求体（OpenAI 兼容格式）
+        Map<String, Object> requestBodyObj = new HashMap<>();
+        requestBodyObj.put("model", modelName);
+        requestBodyObj.put("messages", messages);
 
-        String apiKey = "sk-86b180d2f5254cb9b7c37af1f442baaf";
+        // 如果有工具，添加到请求中
+        if (!toolSpecs.isEmpty()) {
+            requestBodyObj.put("tools", toolSpecs);
+            requestBodyObj.put("tool_choice", "auto");
+        }
+
         String requestBody = mapper.writeValueAsString(requestBodyObj);
-
-        // 【可选】脱敏：隐藏 API Key（生产环境建议）
-        // String safeRequestBody = requestBody.replace(apiKey, "sk-****");
-        // log.debug("➡️ 向百炼 API 发送请求: {}", safeRequestBody);
-        logger.debug("➡️ 向百炼 API 发送请求: {}", requestBody);
+        logger.debug("➡️ 向 Gemini API 发送请求 (Model: {}): {}", modelName, requestBody);
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"))
+                .uri(URI.create(url))
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .timeout(Duration.ofSeconds(90))
                 .build();
 
         HttpResponse<String> response;
         try {
             response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         } catch (Exception e) {
-            logger.error("❌ 调用百炼 API 时发生异常", e);
+            logger.error("❌ 调用 Gemini API 时发生异常", e);
             throw new RuntimeException("AI 服务调用失败: " + e.getMessage(), e);
         }
 
-        logger.debug("⬅️ 百炼 API 响应状态码: {}, 响应体: {}", response.statusCode(), response.body());
+        logger.debug("⬅️ Gemini API 响应状态码: {}, 响应体: {}", response.statusCode(), response.body());
 
         // 检查 HTTP 状态码
         if (response.statusCode() != 200) {
-            logger.warn("⚠️ 百炼 API 返回非200状态码: {}，响应: {}", response.statusCode(), response.body());
+            logger.warn("⚠️ Gemini API 返回非200状态码: {}，响应: {}", response.statusCode(), response.body());
             throw new RuntimeException("AI 服务错误: HTTP " + response.statusCode());
         }
 
-        // 解析 JSON 响应
+        // 解析 JSON 响应（OpenAI 格式）
         JsonNode root = mapper.readTree(response.body());
+        logger.debug("Gemini API 响应: {}", response.body());
 
-        // ✅ 仅当存在 'code' 字段且不为 "200" 时，才视为业务错误
-        if (root.has("code")) {
-            String code = root.path("code").asText();
-            if (!"200".equals(code)) {
-                String errorMsg = root.path("message").asText("未知错误");
-                logger.warn("⚠️ 百炼 API 业务错误 - code: {}, message: {}, full response: {}", code, errorMsg, response.body());
-                throw new RuntimeException("AI 业务错误: " + errorMsg + " (code=" + code + ")");
-            }
+        // 检查错误
+        if (root.has("error")) {
+            String errorMsg = root.path("error").path("message").asText("未知错误");
+            String errorCode = root.path("error").path("code").asText("UNKNOWN");
+            logger.warn("Gemini API 业务错误 [{}]: {}", errorCode, errorMsg);
+            throw new RuntimeException("AI 业务错误: " + errorMsg);
         }
-
 
         // 正常路径：提取模型返回的消息
-        JsonNode choices = root.path("output").path("choices");
+        JsonNode choices = root.path("choices");
         if (choices.isEmpty() || !choices.isArray() || choices.size() == 0) {
-            logger.warn("⚠️ 百炼 API 返回空 choices: {}", response.body());
+            logger.warn("⚠️ Gemini API 返回空 choices: {}", response.body());
             throw new RuntimeException("AI 返回结果无效：choices 为空");
-        }
-        String requestId = root.path("request_id").asText("N/A");
-        logger.debug("📋 百炼 Request ID: {}", requestId);
-
-// 如果是错误，也带上 request_id
-        if (root.has("code") && !"200".equals(root.path("code").asText())) {
-            String errorMsg = root.path("message").asText("未知错误");
-            logger.warn("⚠️ 百炼 API 业务错误 - request_id: {}, code: {}, message: {}",
-                    requestId, root.path("code").asText(), errorMsg);
-            throw new RuntimeException("AI 业务错误: " + errorMsg);
         }
 
         return choices.get(0).path("message");

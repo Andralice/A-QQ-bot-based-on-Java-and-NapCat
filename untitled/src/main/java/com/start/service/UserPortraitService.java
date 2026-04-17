@@ -114,6 +114,7 @@ public class UserPortraitService {
         StringBuilder prompt = new StringBuilder();
         prompt.append("你是一个 QQ 群聊天机器人。请基于聊天记录持续更新对该用户的认知：\n" +
                 "用户画像：记录其真实兴趣（如“常聊原神”“关注 A 股”），新信息合并进旧画像，不虚构。\n" +
+                "生成的用户画像会用于之后对该用户的聊天 \n" +
                 "好感度：根据该用户是否主动找你聊天、语气是否友好（如用“谢谢”、表情包）动态调整，初始 50 分（0–100）。\n" +
                 "始终以“你（AI）对该用户”的视角理解。\n\n");
         if (profileOpt.isPresent()) {

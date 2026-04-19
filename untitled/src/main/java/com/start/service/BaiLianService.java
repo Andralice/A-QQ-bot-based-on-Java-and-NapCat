@@ -433,11 +433,10 @@ public class BaiLianService {
                     String toolResult = tool.execute(args);
                     logger.info("🔧 工具 [{}] 执行结果: {}", toolName, toolResult);
 
-                    messages.add(Map.of(
-                            "role", "assistant",
-                            "content", "",
-                            "tool_calls", toolCall.toString()
-                    ));
+                    messages.add(new HashMap<String, Object>() {{
+                        put("role", "assistant");
+                        put("content", null);
+                    }});
 
                     messages.add(Map.of(
                             "role", "tool",
@@ -452,6 +451,8 @@ public class BaiLianService {
                     secondRequestBody.put("tool_choice", "auto");
 
                     String secondRequest = mapper.writeValueAsString(secondRequestBody);
+                    
+                    logger.debug("➡️ 发送第二次请求（含工具结果）: {}", secondRequest);
 
                     HttpRequest secondRequestObj = HttpRequest.newBuilder()
                             .uri(URI.create(url))
@@ -467,8 +468,21 @@ public class BaiLianService {
                         JsonNode secondRoot = mapper.readTree(secondResponse.body());
                         JsonNode secondChoices = secondRoot.path("choices");
                         if (secondChoices.isArray() && !secondChoices.isEmpty()) {
-                            reply = secondChoices.get(0).path("message").path("content").asText().trim();
+                            String secondReply = secondChoices.get(0).path("message").path("content").asText().trim();
+                            if (!secondReply.isEmpty()) {
+                                reply = secondReply;
+                                logger.info("✅ 工具调用后生成最终回复: {}", reply);
+                            } else {
+                                logger.warn("⚠️ 第二次响应中 content 为空，使用工具结果作为回复");
+                                reply = toolResult;
+                            }
+                        } else {
+                            logger.warn("⚠️ 第二次响应 choices 为空，使用工具结果");
+                            reply = toolResult;
                         }
+                    } else {
+                        logger.error("❌ 第二次请求失败 HTTP {}: {}", secondResponse.statusCode(), secondResponse.body());
+                        reply = "天气查询成功，但生成回复失败...";
                     }
                 }
             }

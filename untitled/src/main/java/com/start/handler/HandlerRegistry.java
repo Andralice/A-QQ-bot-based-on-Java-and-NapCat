@@ -3,6 +3,7 @@ package com.start.handler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.start.Main;
 import com.start.config.DatabaseConfig;
+import com.start.repository.EggGroupDataCenter;
 import com.start.repository.UserAffinityRepository;
 import com.start.service.AgentService;
 import com.start.service.BaiLianService;
@@ -26,6 +27,8 @@ public class HandlerRegistry {
     private static final KeywordKnowledgeService knowledgeService = new KeywordKnowledgeService(DatabaseConfig.getDataSource());
     private static final AgentService agentService = new AgentService(baiLianService, knowledgeService,userAffinityRepo);
 
+    private static final EggGroupDataCenter dataCenter = new EggGroupDataCenter();
+
     static {
         // 注册所有 Handler（顺序很重要！先匹配的先生效）
         handlers.add(new HelloHandler());
@@ -35,6 +38,7 @@ public class HandlerRegistry {
         handlers.add(new SanjiaoHandler());
         handlers.add(new DailyProfessionHandler());
         handlers.add(new DailyCpHandler());
+        handlers.add(new EggGroupSearchHandler(dataCenter));
         handlers.add(new AgentHandler(agentService));
         logger.debug("未使用agent");
         // 后续新增功能，只需在这里 add(new XxxHandler())

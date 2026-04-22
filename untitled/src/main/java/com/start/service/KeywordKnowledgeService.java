@@ -80,7 +80,7 @@ public class KeywordKnowledgeService {
         this.fullCache = new ArrayList<>();
         this.stopWords = initStopWords();
         reloadKnowledgeBase();
-        System.out.println("关键词知识管理器初始化完成，共加载 " + fullCache.size() + " 条知识");
+        logger.info("关键词知识管理器初始化完成，共加载 {} 条知识", fullCache.size());
     }
 
 
@@ -280,7 +280,7 @@ public class KeywordKnowledgeService {
                     keywordCache.computeIfAbsent(kw, k -> new ArrayList<>()).add(item);
                 }
             }
-            System.out.println("知识库加载完成：" + fullCache.size() + " 条，关键词索引：" + keywordCache.size() + " 个");
+            logger.info("知识库加载完成：{} 条，关键词索引：{} 个", fullCache.size(), keywordCache.size());
         } catch (SQLException e) {
             logger.error("重载知识库失败", e);
         }

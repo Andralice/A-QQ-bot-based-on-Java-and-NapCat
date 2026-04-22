@@ -249,8 +249,15 @@ public class Main extends WebSocketClient {
                 return;
             }
 
-            String messageType = event.path("message_type").asText();
+            // ✅ 过滤掉机器人自己发送的消息
+            long selfId = event.path("self_id").asLong();
             long userId = event.path("user_id").asLong();
+            if (userId == selfId) {
+                logger.debug("🚫 忽略机器人自己的消息 | user_id={}", userId);
+                return;
+            }
+
+            String messageType = event.path("message_type").asText();
             boolean isAllowed = false;
 
             // 判断是否在白名单内
@@ -284,6 +291,13 @@ public class Main extends WebSocketClient {
 
                     // ... 其他逻辑（如 dispatch）...
                 }
+                
+                // ✅ 优先处理远行商人响应
+                if (HandlerRegistry.handleMerchantResponse(event, this)) {
+                    logger.debug("✅ 已处理远行商人响应，跳过常规分发");
+                    return;
+                }
+                
                 // 执行防刷检测（仅群聊）
                 if ("group".equals(messageType)) {
                     long groupId = event.path("group_id").asLong();

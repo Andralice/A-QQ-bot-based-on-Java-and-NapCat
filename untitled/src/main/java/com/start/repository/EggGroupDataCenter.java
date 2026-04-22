@@ -14,7 +14,8 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 蛋组数据中心
@@ -24,10 +25,11 @@ import java.util.logging.Logger;
  */
 public class EggGroupDataCenter {
 
-    private static final Logger logger = Logger.getLogger(EggGroupDataCenter.class.getName());
+    private static final Logger logger = LoggerFactory.getLogger(EggGroupDataCenter.class);
     private static final String DATA_FILE_PATH = "egg_group_cache.json";
     private static final String ALL_PETS_RESOURCE_PATH = "/pets/all_pets.json";
     private static final String EGG_GROUP_API_URL = "https://roco.gptvip.chat/api/egg-group-members?group_id=%d&page=1&page_size=100";
+    private static final String EGG_PREDICT_API_URL = "https://wiki.lcx.cab/lk/egg_group_query.php?action=predict&size=%.3f&weight=%.3f";
 
     // 使用 AtomicReference 保证数据更新时的线程安全（读写分离）
     private final AtomicReference<Map<String, String>> petToGroupMap = new AtomicReference<>(new HashMap<>());
@@ -80,9 +82,9 @@ public class EggGroupDataCenter {
         // 遍历所有蛋组（2-15，跳过 group_id=1）
         for (int groupId = 2; groupId <= 15; groupId++) {
             try {
-                Thread.sleep(300); // 请求间隔
+                Thread.sleep(300);
                 
-                logger.fine("🔍 查询蛋组 [" + groupId + "/14]");
+                logger.debug("🔍 查询蛋组 [" + groupId + "/14]");
                 
                 String url = String.format(EGG_GROUP_API_URL, groupId);
                 String json = fetchDataFromUrl(url);
@@ -114,17 +116,17 @@ public class EggGroupDataCenter {
                         
                         totalPets += petsInGroup.size();
                         successGroups++;
-                        logger.fine("✅ " + groupName + " 解析成功: " + petsInGroup.size() + " 只宠物");
+                        logger.debug("✅ " + groupName + " 解析成功: " + petsInGroup.size() + " 只宠物");
                     } else {
                         failedGroups++;
                     }
                 } else {
                     failedGroups++;
-                    logger.warning("❌ 蛋组 " + groupId + " 查询失败");
+                    logger.warn("❌ 蛋组 " + groupId + " 查询失败");
                 }
             } catch (Exception e) {
                 failedGroups++;
-                logger.warning("❌ 蛋组 " + groupId + " 查询异常: " + e.getMessage());
+                logger.warn("❌ 蛋组 " + groupId + " 查询异常: " + e.getMessage());
             }
         }
         
@@ -138,7 +140,7 @@ public class EggGroupDataCenter {
             String cacheJson = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(convertToCacheFormat(newPetToGroup, newGroupToPets));
             saveLocalData(cacheJson);
         } catch (Exception e) {
-            logger.warning("保存缓存失败: " + e.getMessage());
+            logger.warn("保存缓存失败: " + e.getMessage());
         }
         
         logger.info("✅ 批量更新完成! 成功蛋组=" + successGroups + ", 失败=" + failedGroups);
@@ -169,7 +171,7 @@ public class EggGroupDataCenter {
         JsonNode root = objectMapper.readTree(jsonContent);
         
         if (!root.has("cards") || !root.get("cards").isArray()) {
-            logger.warning("⚠️ 蛋组 " + groupId + " 响应格式错误");
+            logger.warn("⚠️ 蛋组 " + groupId + " 响应格式错误");
             return null;
         }
         
@@ -177,9 +179,9 @@ public class EggGroupDataCenter {
         String groupName = "未知组";
         if (root.has("group") && root.get("group").has("group_display")) {
             groupName = root.get("group").get("group_display").asText();
-            logger.fine("📌 蛋组 " + groupId + " 名称: " + groupName);
+            logger.debug("📌 蛋组 " + groupId + " 名称: " + groupName);
         } else {
-            logger.warning("⚠️ 无法获取蛋组 " + groupId + " 的名称，使用默认值");
+            logger.warn("⚠️ 无法获取蛋组 " + groupId + " 的名称，使用默认值");
         }
         
         List<String> petsInGroup = new ArrayList<>();
@@ -233,13 +235,13 @@ public class EggGroupDataCenter {
                 
                 if (rep.has("class_name")) {
                     String className = rep.get("class_name").asText();
-                    logger.fine("📌 使用 class_name: " + className);
+                    logger.debug("📌 使用 class_name: " + className);
                     return className;
                 }
                 
                 if (rep.has("type_name")) {
                     String typeName = rep.get("type_name").asText();
-                    logger.fine("📌 使用 type_name: " + typeName);
+                    logger.debug("📌 使用 type_name: " + typeName);
                     return typeName;
                 }
             }
@@ -255,7 +257,7 @@ public class EggGroupDataCenter {
         }
         
         // 方案3：最后使用预定义的映射表
-        logger.warning("⚠️ 无法从响应中提取蛋组名称，使用映射表");
+        logger.warn("⚠️ 无法从响应中提取蛋组名称，使用映射表");
         return getEggGroupNameById(defaultGroupId);
     }
 
@@ -322,7 +324,7 @@ public class EggGroupDataCenter {
             InputStream inputStream = getClass().getResourceAsStream(ALL_PETS_RESOURCE_PATH);
             
             if (inputStream == null) {
-                logger.warning("宠物列表资源文件不存在: " + ALL_PETS_RESOURCE_PATH);
+                logger.warn("宠物列表资源文件不存在: " + ALL_PETS_RESOURCE_PATH);
                 return Collections.emptyList();
             }
             
@@ -347,8 +349,7 @@ public class EggGroupDataCenter {
             logger.info("📋 从资源文件加载了 " + petNames.size() + " 只宠物");
             return petNames;
         } catch (Exception e) {
-            logger.severe("读取宠物列表资源文件失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("读取宠物列表资源文件失败: " + e.getMessage(), e);
             return Collections.emptyList();
         }
     }
@@ -500,6 +501,13 @@ public class EggGroupDataCenter {
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(5000);
         conn.setReadTimeout(5000);
+        
+        // 模拟浏览器请求头
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        conn.setRequestProperty("Accept", "application/json, text/plain, */*");
+        conn.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+        conn.setRequestProperty("Referer", "https://wiki.lcx.cab/");
+        conn.setRequestProperty("Connection", "keep-alive");
 
         if (conn.getResponseCode() == 200) {
             BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
@@ -559,7 +567,7 @@ public class EggGroupDataCenter {
                 logger.info("📂 已从本地文件加载数据");
                 return true;
             } catch (Exception e) {
-                logger.warning("读取本地缓存失败: " + e.getMessage());
+                logger.warn("读取本地缓存失败: " + e.getMessage());
                 return false;
             }
         } else {
@@ -602,7 +610,7 @@ public class EggGroupDataCenter {
             
             logger.info("💾 已创建初始数据文件: " + DATA_FILE_PATH);
         } catch (Exception e) {
-            logger.warning("创建初始数据文件失败: " + e.getMessage());
+            logger.warn("创建初始数据文件失败: " + e.getMessage());
         }
     }
 
@@ -610,7 +618,7 @@ public class EggGroupDataCenter {
         try (FileWriter writer = new FileWriter(DATA_FILE_PATH)) {
             writer.write(json);
         } catch (IOException e) {
-            logger.warning("保存本地缓存失败: " + e.getMessage());
+            logger.warn("保存本地缓存失败: " + e.getMessage());
         }
     }
 
@@ -676,6 +684,117 @@ public class EggGroupDataCenter {
         filtered.removeAll(excluded);
         
         return new ArrayList<>(filtered);
+    }
+
+    /**
+     * 根据身高体重预测可能的宠物种族
+     * @param size 身高（米）
+     * @param weight 体重（千克）
+     * @return 预测结果列表，包含匹配的宠物信息
+     */
+    public List<PredictResult> predictEggRace(double size, double weight) {
+        try {
+            String url = String.format(EGG_PREDICT_API_URL, size, weight);
+            String json = fetchDataFromUrl(url);
+            
+            if (json == null || json.isEmpty()) {
+                logger.warn("⚠️ 预测 API 返回为空");
+                return Collections.emptyList();
+            }
+            
+            return parsePredictResult(json);
+        } catch (Exception e) {
+            logger.error("❌ 预测宠物种族失败: " + e.getMessage(), e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 解析预测 API 响应
+     */
+    private List<PredictResult> parsePredictResult(String jsonContent) throws IOException {
+        JsonNode root = objectMapper.readTree(jsonContent);
+        
+        if (!root.has("success") || !root.get("success").asBoolean()) {
+            logger.warn("⚠️ 预测 API 返回失败: " + root.path("message").asText());
+            return Collections.emptyList();
+        }
+        
+        List<PredictResult> results = new ArrayList<>();
+        JsonNode pokemonsNode = root.get("pokemons");
+        
+        if (pokemonsNode != null && pokemonsNode.isArray()) {
+            for (JsonNode pokemon : pokemonsNode) {
+                String name = pokemon.has("name") ? pokemon.get("name").asText() : "未知";
+                
+                // 过滤恶意或无效数据
+                if (isInvalidPetName(name)) {
+                    logger.debug("⚠️ 过滤无效宠物名: " + name);
+                    continue;
+                }
+                
+                PredictResult result = new PredictResult();
+                result.tId = pokemon.has("t_id") ? pokemon.get("t_id").asInt() : 0;
+                result.name = name;
+                result.attributes = pokemon.has("attributes") ? pokemon.get("attributes").asText() : "未知";
+                result.chainGroup = pokemon.has("chain_group") ? pokemon.get("chain_group").asText() : "未知";
+                result.evolutionStage = pokemon.has("evolution_stage") ? pokemon.get("evolution_stage").asInt() : 0;
+                
+                results.add(result);
+            }
+        }
+        
+        int totalMatches = root.has("total_matches") ? root.get("total_matches").asInt() : 0;
+        
+        logger.info("✅ 预测成功: 共找到 " + totalMatches + " 个匹配，返回前 " + results.size() + " 个");
+        
+        return results;
+    }
+
+    /**
+     * 判断是否为无效的宠物名称
+     */
+    private boolean isInvalidPetName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return true;
+        }
+        
+        String trimmed = name.trim();
+        
+        // 过滤明显的恶意关键词
+        String[] invalidKeywords = {"傻逼", "傻叉", "废物", "垃圾", "操", "草泥马"};
+        for (String keyword : invalidKeywords) {
+            if (trimmed.contains(keyword)) {
+                return true;
+            }
+        }
+        
+        // 过滤纯符号或无意义名称
+        if (trimmed.matches("^[^\\u4e00-\\u9fa5a-zA-Z0-9]+$")) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * 预测结果内部类
+     */
+    public static class PredictResult {
+        public int tId;              // 宠物 ID
+        public String name;          // 宠物名称
+        public String attributes;    // 属性
+        public String chainGroup;    // 进化链组
+        public int evolutionStage;   // 进化阶段
+        
+        @Override
+        public String toString() {
+            return "PredictResult{" +
+                   "name='" + name + '\'' +
+                   ", attributes='" + attributes + '\'' +
+                   ", stage=" + evolutionStage +
+                   '}';
+        }
     }
 
     /**

@@ -4,6 +4,9 @@ package com.start.config;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -12,6 +15,7 @@ import java.util.Properties;
 
 public class DatabaseConfig {
 
+    private static final Logger logger = LoggerFactory.getLogger(DatabaseConfig.class);
     private static HikariDataSource dataSource;
     private static boolean initialized = false;
 
@@ -21,15 +25,15 @@ public class DatabaseConfig {
     public synchronized static void initConnectionPool() {
         if (initialized) return;
 
-        System.out.println("正在初始化数据库连接池...");
+        logger.info("正在初始化数据库连接池...");
 
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                System.out.println("连接尝试 " + attempt + "/3");
+                logger.info("连接尝试 {}/3", attempt);
 
                 // 先测试基本连接
                 if (!testBasicConnection()) {
-                    System.err.println("基本连接测试失败，等待重试...");
+                    logger.warn("基本连接测试失败，等待重试...");
                     Thread.sleep(2000);
                     continue;
                 }
@@ -73,16 +77,16 @@ public class DatabaseConfig {
 
                 // 测试连接池
                 try (Connection conn = dataSource.getConnection()) {
-                    System.out.println("✅ 数据库连接池初始化成功");
-                    System.out.println("连接URL: " + dbUrl);
-                    System.out.println("连接池状态: " + getPoolStatus());
+                    logger.info("✅ 数据库连接池初始化成功");
+                    logger.info("连接URL: {}", dbUrl);
+                    logger.info("连接池状态: {}", getPoolStatus());
                 }
 
                 initialized = true;
                 return;
 
             } catch (Exception e) {
-                System.err.println("连接尝试 " + attempt + " 失败: " + e.getMessage());
+                logger.error("连接尝试 {} 失败: {}", attempt, e.getMessage());
                 if (attempt < 3) {
                     try {
                         Thread.sleep(3000);
@@ -90,17 +94,17 @@ public class DatabaseConfig {
                         Thread.currentThread().interrupt();
                     }
                 } else {
-                    System.err.println("❌ 数据库连接池初始化失败，将使用降级模式");
-                    System.err.println("提示：请检查：");
-                    System.err.println("1. SSH隧道是否启动 (ssh -L 3307:localhost:3306 ...)");
-                    System.err.println("2. MySQL服务是否运行");
-                    System.err.println("3. 数据库用户密码是否正确");
+                    logger.error("❌ 数据库连接池初始化失败，将使用降级模式");
+                    logger.error("提示：请检查：");
+                    logger.error("1. SSH隧道是否启动 (ssh -L 3307:localhost:3306 ...)");
+                    logger.error("2. MySQL服务是否运行");
+                    logger.error("3. 数据库用户密码是否正确");
                 }
             }
         }
 
         // 如果所有尝试都失败，设置一个标志
-        System.err.println("警告：数据库连接失败，相关功能将不可用");
+        logger.warn("警告：数据库连接失败，相关功能将不可用");
     }
 
     /**
@@ -114,14 +118,14 @@ public class DatabaseConfig {
             String user = props.getProperty("database.user", "candybear");
             String password = props.getProperty("database.password", "YourStrongPassword123!");
 
-            System.out.println("测试连接: " + url);
+            logger.info("测试连接: {}", url);
 
             try (Connection conn = DriverManager.getConnection(url, user, password)) {
-                System.out.println("✅ 基本连接测试成功");
+                logger.info("✅ 基本连接测试成功");
                 return true;
             }
         } catch (SQLException e) {
-            System.err.println("基本连接测试失败: " + e.getMessage());
+            logger.error("基本连接测试失败: {}", e.getMessage());
             return false;
         }
     }
@@ -147,7 +151,7 @@ public class DatabaseConfig {
     public static void close() {
         if (dataSource != null && !dataSource.isClosed()) {
             dataSource.close();
-            System.out.println("数据库连接池已关闭");
+            logger.info("数据库连接池已关闭");
         }
     }
 
@@ -179,10 +183,10 @@ public class DatabaseConfig {
                 .getResourceAsStream("application.properties")) {
             if (is != null) {
                 props.load(is);
-                System.out.println("加载配置文件成功");
+                logger.info("加载配置文件成功");
             }
         } catch (Exception e) {
-            System.err.println("加载配置文件失败，使用默认值");
+            logger.error("加载配置文件失败，使用默认值");
         }
 
         return props;

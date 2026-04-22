@@ -22,7 +22,8 @@ public class EggGroupSearchHandler implements MessageHandler {
     private static final String CMD_EGG_GROUP = "#查蛋组";
     private static final String CMD_CAN_BREED = "#能否生蛋";
     private static final String CMD_EVOLUTION = "#查进化";
-    private static final String CMD_EGG_GROUP_DETAIL = "#查蛋组详情";
+    private static final String CMD_PREDICT = "#预测蛋";
+    private static final String CMD_HELP = "#洛克王国";
     // 通过构造函数注入数据中心
     public EggGroupSearchHandler(EggGroupDataCenter dataCenter) {
         this.dataCenter = dataCenter;
@@ -33,11 +34,13 @@ public class EggGroupSearchHandler implements MessageHandler {
         String text = extractText(message);
         if (text == null) return false;
         
-        // 支持五个命令前缀
+        // 支持六个命令前缀
         return text.startsWith(CMD_PREFIX) || 
                text.startsWith(CMD_EGG_GROUP) || 
                text.startsWith(CMD_CAN_BREED) ||
-               text.startsWith(CMD_EVOLUTION);
+               text.startsWith(CMD_EVOLUTION) ||
+               text.startsWith(CMD_PREDICT) ||
+               text.equals(CMD_HELP);
     }
 
     @Override
@@ -46,7 +49,11 @@ public class EggGroupSearchHandler implements MessageHandler {
         if (text == null) return;
 
         // 路由到不同的处理逻辑
-        if (text.startsWith(CMD_EVOLUTION)) {
+        if (text.equals(CMD_HELP)) {
+            handleHelp(bot, message);
+        } else if (text.startsWith(CMD_PREDICT)) {
+            handlePredictRace(text, bot, message);
+        } else if (text.startsWith(CMD_EVOLUTION)) {
             handleEvolutionQuery(text, bot, message);
         } else if (text.startsWith(CMD_CAN_BREED)) {
             handleCanBreed(text, bot, message);
@@ -60,6 +67,105 @@ public class EggGroupSearchHandler implements MessageHandler {
             }
         } else if (text.startsWith(CMD_PREFIX)) {
             handleMateQuery(text, bot, message);
+        }
+    }
+
+    /**
+     * 处理帮助命令：#洛克王国
+     */
+    private void handleHelp(Main bot, JsonNode message) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("🎮 洛克王国宠物助手\n");
+        sb.append("━━━━━━━━━━━━━━━\n");
+        
+        sb.append("📌 可用命令：\n");
+        
+        sb.append("1️⃣ #查蛋 宠物名\n");
+        sb.append("   查询宠物蛋组及可配对宠物\n");
+        
+        sb.append("2️⃣ #查蛋组 宠物名/蛋组名\n");
+        sb.append("   查询宠物所属蛋组或蛋组详情\n");
+        
+        sb.append("3️⃣ #能否生蛋 宠物1 宠物2\n");
+        sb.append("   判断两只宠物是否可以生蛋\n");
+        
+        sb.append("4️⃣ #查进化 宠物名\n");
+        sb.append("   查询宠物的完整进化路径\n");
+        
+        sb.append("5️⃣ #预测蛋 身高 体重\n");
+        sb.append("   根据身高体重预测宠物种族\n");
+        
+        sb.append("6️⃣ 远行商人\n");
+        sb.append("   查询远行商人当前商品信息\n");
+        
+        sb.append("━━━━━━━━━━━━━━━\n");
+        sb.append("💡 输入任意命令即可开始查询");
+        
+        reply(bot, message, sb.toString());
+    }
+
+    /**
+     * 处理种族预测：#预测蛋 身高 体重
+     */
+    private void handlePredictRace(String text, Main bot, JsonNode message) {
+        // 1. 解析身高体重
+        String content = text.replace(CMD_PREDICT, "").trim();
+        
+        // 分割参数（支持空格或逗号分隔）
+        String[] parts = content.split("\\s+|,");
+        
+        if (parts.length < 2) {
+            reply(bot, message, "❌ 格式错误，请使用：#预测蛋 身高 体重\n示例：#预测蛋 1.5 2.564");
+            return;
+        }
+        
+        try {
+            double size = Double.parseDouble(parts[0].trim());
+            double weight = Double.parseDouble(parts[1].trim());
+            
+            // 验证范围
+            if (size <= 0 || size > 100 || weight <= 0 || weight > 10000) {
+                reply(bot, message, "❌ 数值不合理，请输入有效的身高（米）和体重（千克）");
+                return;
+            }
+            
+            // 添加随机延迟，模拟人类操作
+            try {
+                long delay = 500 + (long)(Math.random() * 1000); // 0.5-1.5秒
+                Thread.sleep(delay);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            
+            // 2. 调用预测 API
+            List<EggGroupDataCenter.PredictResult> results = dataCenter.predictEggRace(size, weight);
+            
+            if (results.isEmpty()) {
+                reply(bot, message, "❌ 未找到匹配的宠物，请检查身高体重是否正确");
+                return;
+            }
+            
+            // 3. 构建回复
+            StringBuilder sb = new StringBuilder();
+            sb.append("🔮 预测结果（身高=").append(size).append("m, 体重=").append(weight).append("kg）：\n\n");
+            sb.append("共找到 ").append(results.size()).append(" 个可能的种族：\n\n");
+            
+            for (int i = 0; i < results.size(); i++) {
+                EggGroupDataCenter.PredictResult result = results.get(i);
+                sb.append((i + 1)).append(". ").append(result.name);
+                sb.append("（").append(result.attributes).append("）");
+                
+                if (result.evolutionStage > 0) {
+                    sb.append(" - 第").append(result.evolutionStage).append("阶段");
+                }
+                
+                sb.append("\n");
+            }
+            
+            reply(bot, message, sb.toString());
+            
+        } catch (NumberFormatException e) {
+            reply(bot, message, "❌ 格式错误，请输入有效的数字\n示例：#预测蛋 1.5 2.564");
         }
     }
 

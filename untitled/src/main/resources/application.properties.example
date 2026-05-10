@@ -1,0 +1,56 @@
+# ============================================
+# application.properties.example
+# 复制此文件为 application.properties 并填入实际值
+# 或设置对应的环境变量
+# ============================================
+
+# NapCat WebSocket 配置
+NAPCT_WS_URL=ws://your-server:5701/?access_token=your_token
+NAPCT_WS_BASE_URL=ws://your-server:5700
+ONEBOT_HTTP_BASE_URL=http://your-server:5700
+ONEBOT_ACCESS_TOKEN=your_access_token
+
+# AI 服务配置 (百炼/BaiLian)
+BAILIAN_API_KEY=sk-your-key
+BAILIAN_BASE_URL=https://api.meai.cloud/v1/chat/completions
+BAILIAN_CHAT_MODEL=glm-5.1
+BAILIAN_TIMEOUT_MS=90000
+BAILIAN_MAX_RETRIES=2
+
+# Agent 服务配置
+AGENT_API_KEY=sk-your-key
+AGENT_BASE_URL=http://api.meai.cloud/v1/chat/completions
+AGENT_MODEL=gemini-3-flash
+AGENT_TIMEOUT_MS=90000
+AGENT_MAX_RETRIES=2
+
+# 兼容旧版
+DASHSCOPE_API_KEY=sk-your-key
+
+# 目标群号
+TARGET_GROUP_ID=437625485
+
+# 调试模式
+DEBUG=false
+
+# 私聊白名单
+PRIVATE_WHITELIST_ENABLED=false
+
+# 机器人 QQ 号
+BOT_QQ=356289140
+
+# 允许的群号（逗号分隔）
+ALLOWED_GROUPS=437625485,1079312807,960982876
+
+# 预加载的群号（逗号分隔）
+PRELOAD_GROUPS=437625485
+
+# 允许私聊的用户（逗号分隔）
+ALLOWED_PRIVATE_USERS=3524398813
+
+# 数据库配置
+DB_URL=jdbc:mysql://localhost:3306/candybear_db
+DB_USER=candybear
+DB_PASSWORD=your_password
+DB_POOL_MAX_SIZE=10
+DB_POOL_MIN_IDLE=2

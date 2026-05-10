@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.config.BotConfig;
 import com.start.config.DatabaseConfig;
-import com.start.handler.AIHandler;
 import com.start.handler.HandlerRegistry;
 import com.start.repository.MessageRepository;
 import com.start.repository.UserAffinityRepository;
@@ -15,10 +14,8 @@ import org.java_websocket.handshake.ServerHandshake;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.InputStream;
 import java.net.URI;
 import java.util.Map;
-import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,10 +40,6 @@ public class Main extends WebSocketClient {
     /** JSON 序列化/反序列化工具，用于解析 OneBot 事件和构造 API 请求。 */
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** WebSocket 服务器地址，从配置文件中加载。 */
-    private static String wsUrl;
-
-    AIHandler aiHandler = new AIHandler();
     // ===== 白名单配置 =====
 
     /** 允许交互的群聊 ID 集合，由 BotConfig 提供。 */
@@ -73,16 +66,16 @@ public class Main extends WebSocketClient {
     private final AIDatabaseService aiDatabaseService;
 
     /** 百炼大模型调用服务（阿里云 DashScope）。 */
-    private static BaiLianService baiLianService;
+    private final BaiLianService baiLianService;
 
     /** 用户亲密度存储仓库，用于个性化推荐与互动。 */
-    private static final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
+    private final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
 
     /** 关键词知识库服务，支持基于关键词的快速问答匹配。 */
-    private static KeywordKnowledgeService keywordKnowledgeService;
+    private final KeywordKnowledgeService keywordKnowledgeService;
 
     /** 智能代理服务，整合大模型、知识库与用户画像。 */
-    public static AgentService agentService = new AgentService(baiLianService, keywordKnowledgeService, userAffinityRepo);
+    private final AgentService agentService;
 
     // ===== 事件处理器与辅助组件 =====
 
@@ -106,30 +99,6 @@ public class Main extends WebSocketClient {
      */
     private final Map<String, CompletableFuture<JsonNode>> pendingRequests = new ConcurrentHashMap<>();
 
-    // ===== 静态初始化块：加载配置与设置环境变量 =====
-
-    static {
-        // 设置 DashScope API 密钥（用于百炼大模型）
-        System.setProperty("dashscope.api-key", "sk-86b180d2f5254cb9b7c37af1f442baaf");
-        System.out.println("DEBUG: dashscope.api-key = " +
-                System.getProperty("dashscope.api-key", "NOT SET"));
-
-        try (InputStream is = Main.class.getClassLoader().getResourceAsStream("application.properties")) {
-            if (is == null) {
-                throw new RuntimeException("❌ 未找到 application.properties 文件！");
-            }
-            Properties props = new Properties();
-            props.load(is);
-            wsUrl = props.getProperty("ws.url");
-            if (wsUrl == null || wsUrl.trim().isEmpty()) {
-                throw new RuntimeException("❌ application.properties 中缺少 ws.url 配置！");
-            }
-            logger.info("🔧 已加载 WebSocket 地址: {}", wsUrl);
-        } catch (Exception e) {
-            logger.error("❌ 初始化配置失败", e);
-            throw new RuntimeException("配置加载失败", e);
-        }
-    }
 
     // ===== 构造函数：初始化核心服务 =====
 
@@ -156,14 +125,17 @@ public class Main extends WebSocketClient {
         // 初始化知识库服务（需数据源）
         this.keywordKnowledgeService = new KeywordKnowledgeService(DatabaseConfig.getDataSource());
 
-        // 初始化事件处理器注册中心
-        this.handlerRegistry = new HandlerRegistry();
-
         // 初始化大模型服务
-        this.baiLianService = new BaiLianService();
-
-        // 重新创建 AgentService 实例（确保使用最新服务引用）
+        this.baiLianService = new BaiLianService(this.keywordKnowledgeService, this.userAffinityRepo);
         this.agentService = new AgentService(this.baiLianService, this.keywordKnowledgeService, this.userAffinityRepo);
+
+        // 初始化事件处理器注册中心
+        this.handlerRegistry = new HandlerRegistry(this.agentService, this.baiLianService);
+
+        // 设置 DashScope API Key（来自配置文件，不使用环境变量）
+        if (BotConfig.getBaiLianApiKey() != null && !BotConfig.getBaiLianApiKey().isBlank()) {
+            System.setProperty("dashscope.api-key", BotConfig.getBaiLianApiKey());
+        }
     }
 
     // ===== 初始化方法：启动后台任务与绑定服务 =====
@@ -176,12 +148,8 @@ public class Main extends WebSocketClient {
         this.spamDetector = new SpamDetector(this);
         logger.info("🛡️ SpamDetector 初始化完成");
 
-        // 将关键词知识库绑定到大模型服务（供其检索使用）
-        BaiLianService.setKnowledgeService(this.keywordKnowledgeService);
         logger.info("🧠 BaiLianService 已绑定 KeywordKnowledgeService");
 
-        // （冗余但安全）再次初始化 AgentService
-        AgentService agentService = new AgentService(this.baiLianService, this.keywordKnowledgeService, userAffinityRepo);
         logger.info("🤖 Agent 已启用");
 
         // 初始化用户画像服务
@@ -293,7 +261,7 @@ public class Main extends WebSocketClient {
                 }
                 
                 // ✅ 优先处理远行商人响应
-                if (HandlerRegistry.handleMerchantResponse(event, this)) {
+                if (this.handlerRegistry.handleMerchantResponse(event, this)) {
                     logger.debug("✅ 已处理远行商人响应，跳过常规分发");
                     return;
                 }
@@ -309,7 +277,7 @@ public class Main extends WebSocketClient {
                 }
 
                 // 分发事件给注册的处理器
-                HandlerRegistry.dispatch(event, this);
+                this.handlerRegistry.dispatch(event, this);
             }
 
         } catch (Exception e) {
@@ -445,7 +413,7 @@ public class Main extends WebSocketClient {
      * 主方法：创建机器人实例，连接 WebSocket 并初始化服务。
      */
     public static void main(String[] args) throws Exception {
-        Main bot = new Main(new URI(wsUrl));
+        Main bot = new Main(new URI(BotConfig.getWsUrl()));
         bot.connect();
         bot.init();
         // 保持主线程运行

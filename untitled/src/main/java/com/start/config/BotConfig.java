@@ -1,6 +1,5 @@
 package com.start.config;
 
-import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,25 +10,39 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Properties;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class BotConfig {
     private static final Logger logger = LoggerFactory.getLogger(BotConfig.class);
-    @Getter
+
     private static long botQq;
-    @Getter
     private static String botName;
-    private static Set<Long> ALLOWED_GROUPS ;
-    private static Set<Long> ALLOWED_PRIVATE_USERS ;
-    // 新增 getter
-    @Getter
     private static boolean privateWhitelistEnabled = false;
-    @Getter
+    private static Set<Long> ALLOWED_GROUPS = Collections.emptySet();
+    private static Set<Long> ALLOWED_PRIVATE_USERS = Collections.emptySet();
     private static String oneBotHttpBaseUrl;
-    @Getter
     private static String oneBotAccessToken;
-    @Getter
-    private static String WsBaseUrl;
+    private static String wsBaseUrl;
+    private static String wsUrl;
+
+    private static String baiLianApiKey;
+    private static String baiLianBaseUrl;
+    private static String baiLianChatModel;
+    private static int baiLianTimeoutMs;
+    private static int baiLianMaxRetries;
+
+    private static String agentApiKey;
+    private static String agentBaseUrl;
+    private static String agentModel;
+    private static int agentTimeoutMs;
+    private static int agentMaxRetries;
+
+    private static int httpConnectTimeoutMs;
+
+    private static final Pattern ENV_PATTERN = Pattern.compile("\\$\\{([^:}]+)(?::([^}]*))?\\}");
+
     static {
         try (InputStream is = BotConfig.class.getClassLoader().getResourceAsStream("application.properties")) {
             if (is == null) {
@@ -45,18 +58,34 @@ public class BotConfig {
             if (qqStr == null || qqStr.trim().isEmpty()) {
                 throw new RuntimeException("❌ 请配置 bot.qq");
             }
-            botQq = Long.parseLong(qqStr.trim());
-            oneBotHttpBaseUrl = props.getProperty("onebot.http-base-url", "http://127.0.0.1:5700").trim();
-            WsBaseUrl = props.getProperty("ws.base.url", "ws://127.0.0.1:6700").trim();
-            oneBotAccessToken = props.getProperty("onebot.access-token", "").trim();
-//            botName = props.getProperty("bot.name", "机器人").trim();
-            botName = "糖果熊";
-            String enabledStr = props.getProperty("private.whitelist.enabled", "false").trim();
+            botQq = Long.parseLong(resolve(qqStr.trim()));
+            oneBotHttpBaseUrl = resolve(props.getProperty("onebot.http-base-url", "http://127.0.0.1:5700").trim());
+            wsBaseUrl = resolve(props.getProperty("ws.base.url", "ws://127.0.0.1:5700").trim());
+            wsUrl = resolve(props.getProperty("ws.url", wsBaseUrl).trim());
+            oneBotAccessToken = resolve(props.getProperty("onebot.access-token", "").trim());
+            botName = props.getProperty("bot.name", "糖果熊").trim();
+            String enabledStr = resolve(props.getProperty("private.whitelist.enabled", "false").trim());
             privateWhitelistEnabled = Boolean.parseBoolean(enabledStr);
-            ALLOWED_GROUPS = parseLongSet(props.getProperty("allowed.groups", ""));
-            ALLOWED_PRIVATE_USERS = parseLongSet(props.getProperty("allowed.private.users", ""));
+            ALLOWED_GROUPS = parseLongSet(resolve(props.getProperty("allowed.groups", "")));
+            ALLOWED_PRIVATE_USERS = parseLongSet(resolve(props.getProperty("allowed.private.users", "")));
+
+            baiLianApiKey = resolve(props.getProperty("bailian.api-key", resolve(props.getProperty("dashscope.api-key", ""))).trim());
+            baiLianBaseUrl = resolve(props.getProperty("bailian.base-url", "https://api.meai.cloud/v1/chat/completions").trim());
+            baiLianChatModel = resolve(props.getProperty("bailian.chat-model", "glm-5.1").trim());
+            baiLianTimeoutMs = parseInt(resolve(props.getProperty("bailian.timeout-ms", "90000")), 90000);
+            baiLianMaxRetries = parseInt(resolve(props.getProperty("bailian.max-retries", "2")), 2);
+
+            agentApiKey = resolve(props.getProperty("agent.api-key", "").trim());
+            agentBaseUrl = resolve(props.getProperty("agent.base-url", "http://114.132.99.114:3000/v1/chat/completions").trim());
+            agentModel = resolve(props.getProperty("agent.model", "gemini-3-flash").trim());
+            agentTimeoutMs = parseInt(resolve(props.getProperty("agent.timeout-ms", "90000")), 90000);
+            agentMaxRetries = parseInt(resolve(props.getProperty("agent.max-retries", "2")), 2);
+
+            httpConnectTimeoutMs = parseInt(resolve(props.getProperty("http.connect-timeout-ms", "10000")), 10000);
+
             logger.info("🤖 机器人 QQ: {}, 名字: {}", botQq, botName);
-            logger.info("🤖 机器人 QQ: {}, 名字: {}", botQq, botName);
+            logger.info("✅ WebSocket 地址: {}", wsUrl);
+            logger.info("✅ OneBot HTTP 地址: {}", oneBotHttpBaseUrl);
             logger.info("✅ 白名单群: {}", ALLOWED_GROUPS);
             logger.info("🔒 私聊白名单开关: {}", privateWhitelistEnabled ? "ON" : "OFF");
             if (privateWhitelistEnabled) {
@@ -69,6 +98,33 @@ public class BotConfig {
             throw new RuntimeException("配置加载失败，请检查 application.properties", e);
         }
     }
+
+    private static String resolve(String value) {
+        if (value == null) return null;
+        Matcher m = ENV_PATTERN.matcher(value.trim());
+        if (m.matches()) {
+            String envName = m.group(1);
+            String envValue = System.getenv(envName);
+            if (envValue != null && !envValue.isBlank()) {
+                return envValue;
+            }
+            String defaultValue = m.group(2);
+            if (defaultValue != null) {
+                return defaultValue;
+            }
+            logger.warn("环境变量 {} 未设置，将使用原始占位符", envName);
+        }
+        return value;
+    }
+
+    private static int parseInt(String value, int defaultValue) {
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
     private static Set<Long> parseLongSet(String value) {
         if (value == null || value.trim().isEmpty()) {
             return Collections.emptySet(); // 空配置 → 返回空集合
@@ -80,8 +136,85 @@ public class BotConfig {
                 .collect(Collectors.toSet()); // 收集成 Set<Long>
     }
 
-    public static Set<Long> getAllowedGroups() { return ALLOWED_GROUPS; }
-    public static Set<Long> getAllowedPrivateUsers() { return ALLOWED_PRIVATE_USERS; }
+    public static long getBotQq() {
+        return botQq;
+    }
+
+    public static String getBotName() {
+        return botName;
+    }
+
+    public static boolean isPrivateWhitelistEnabled() {
+        return privateWhitelistEnabled;
+    }
+
+    public static Set<Long> getAllowedGroups() {
+        return ALLOWED_GROUPS;
+    }
+
+    public static Set<Long> getAllowedPrivateUsers() {
+        return ALLOWED_PRIVATE_USERS;
+    }
+
+    public static String getOneBotHttpBaseUrl() {
+        return oneBotHttpBaseUrl;
+    }
+
+    public static String getOneBotAccessToken() {
+        return oneBotAccessToken;
+    }
+
+    public static String getWsBaseUrl() {
+        return wsBaseUrl;
+    }
+
+    public static String getWsUrl() {
+        return wsUrl;
+    }
+
+    public static String getBaiLianApiKey() {
+        return baiLianApiKey;
+    }
+
+    public static String getBaiLianBaseUrl() {
+        return baiLianBaseUrl;
+    }
+
+    public static String getBaiLianChatModel() {
+        return baiLianChatModel;
+    }
+
+    public static int getBaiLianTimeoutMs() {
+        return baiLianTimeoutMs;
+    }
+
+    public static int getBaiLianMaxRetries() {
+        return baiLianMaxRetries;
+    }
+
+    public static String getAgentApiKey() {
+        return agentApiKey;
+    }
+
+    public static String getAgentBaseUrl() {
+        return agentBaseUrl;
+    }
+
+    public static String getAgentModel() {
+        return agentModel;
+    }
+
+    public static int getAgentTimeoutMs() {
+        return agentTimeoutMs;
+    }
+
+    public static int getAgentMaxRetries() {
+        return agentMaxRetries;
+    }
+
+    public static int getHttpConnectTimeoutMs() {
+        return httpConnectTimeoutMs;
+    }
 
     public static String getAt(long userId) {
         return "[CQ:at,qq=" + userId + "]";

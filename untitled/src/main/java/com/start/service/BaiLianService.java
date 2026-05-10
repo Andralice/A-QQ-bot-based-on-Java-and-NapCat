@@ -24,6 +24,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 
@@ -68,35 +69,42 @@ import java.util.stream.Collectors;
  * @see com.start.service.KeywordKnowledgeService
  */
 public class BaiLianService {
-    public static void setKnowledgeService(KeywordKnowledgeService service) {
-        if (service == null) {
-            throw new IllegalArgumentException("knowledgeService cannot be null");
-        }
-        BaiLianService.knowledgeService = service;
-        logger.info("KeywordKnowledgeService successfully injected.");
-    }
-    private static KeywordKnowledgeService knowledgeService;
+    private final KeywordKnowledgeService knowledgeService;
+    private final UserAffinityRepository userAffinityRepo;
+
     private static final Logger logger = LoggerFactory.getLogger(BaiLianService.class);
     private static final long BOT_QQ = BotConfig.getBotQq();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final DateTimeFormatter BEIJING_TIME_FORMATTER = DateTimeFormatter.ofPattern(
+            "yyyy年M月d日 EEEE HH:mm:ss '北京时间'",
+            Locale.CHINA
+    );
+
     private final BehaviorAnalyzer behaviorAnalyzer = new BehaviorAnalyzer();
-    // 复用 ObjectMapper（避免重复创建）
-    private static final ObjectMapper mapper = new ObjectMapper();
-    private static final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
-    
-    /**
-     * HTTP 客户端实例，用于发送 AI API 请求
-     * <p>
-     * 配置说明：
-     * <ul>
-     *     <li>连接超时：10 秒</li>
-     *     <li>线程池：固定 5 个线程，支持并发请求</li>
-     * </ul>
-     */
+    private final UserProfileRepository profileRepo = new UserProfileRepository();
+
+    private final String baiLianApiKey = BotConfig.getBaiLianApiKey();
+    private final String baiLianBaseUrl = BotConfig.getBaiLianBaseUrl();
+    private final String bailianChatModel = BotConfig.getBaiLianChatModel();
+    private final int bailianTimeoutMs = BotConfig.getBaiLianTimeoutMs();
+    private final int bailianMaxRetries = BotConfig.getBaiLianMaxRetries();
+
+    private final String agentApiKey = BotConfig.getAgentApiKey();
+    private final String agentBaseUrl = BotConfig.getAgentBaseUrl();
+    private final String agentModel = BotConfig.getAgentModel();
+    private final int agentTimeoutMs = BotConfig.getAgentTimeoutMs();
+    private final int agentMaxRetries = BotConfig.getAgentMaxRetries();
+
     private static final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
+            .connectTimeout(Duration.ofMillis(BotConfig.getHttpConnectTimeoutMs()))
             .executor(Executors.newFixedThreadPool(10))
             .build();
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    public BaiLianService(KeywordKnowledgeService knowledgeService, UserAffinityRepository userAffinityRepo) {
+        this.knowledgeService = Objects.requireNonNull(knowledgeService, "knowledgeService cannot be null");
+        this.userAffinityRepo = Objects.requireNonNull(userAffinityRepo, "userAffinityRepo cannot be null");
+    }
     // === 上下文管理 ===
     private final Map<String, List<Message>> sessions = new ConcurrentHashMap<>(); // sessionId -> 消息历史
     private final Map<String, Long> lastClearTime = new ConcurrentHashMap<>();
@@ -224,11 +232,8 @@ public class BaiLianService {
         }
 
         try {
-            UserProfileRepository profileRepo = new UserProfileRepository();
-            UserAffinityRepository affinityRepo = new UserAffinityRepository();
-
             var profile = profileRepo.findByUserIdAndGroupId(userId, groupId);
-            var affinity = affinityRepo.findByUserIdAndGroupId(userId, groupId);
+            var affinity = userAffinityRepo.findByUserIdAndGroupId(userId, groupId);
 
             if (profile.isPresent()) {
                 context += "\n【用户画像】" + profile.get().getProfileText() + "\n\n";
@@ -238,7 +243,7 @@ public class BaiLianService {
                 context += "\n【你们的好感度是】" + score + ",每人的基础好感度是50\n\n";
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.warn("读取用户画像或好感度失败", e);
         }
 
         KeywordKnowledgeService.KnowledgeResult knowledgeResult =
@@ -325,29 +330,23 @@ public class BaiLianService {
                 messages.add(Map.of("role", role, "content", content));
             }
 
-            String url = "http://114.132.99.114:3000/v1/chat/completions";
-            String apiKey = "sk-WzQMkepAo1qJKub5IAzbVxTXPupYW7HVtBlxw4AlyhsRqYDk";
-            String modelName = "glm-5.1";
+            String url = this.baiLianBaseUrl;
+            String apiKey = this.baiLianApiKey;
+            String modelName = this.bailianChatModel;
 
             Map<String, Object> requestBodyObj = new HashMap<>();
             requestBodyObj.put("model", modelName);
             requestBodyObj.put("messages", messages);
 
-            final List<Tool> availableTools = Arrays.asList(
-                    new WeatherTool(),
-                    new UserAffinityTool(userAffinityRepo)
-            );
+            // 当前模型 (glm-5.1) 不兼容 OpenAI function calling，
+            // 会在 content 中输出 <tool_call> 文本而非 JSON tool_calls，
+            // 因此普通聊天不传 tools，避免用户收到工具调用原文。
+            // final List<Tool> availableTools = Arrays.asList(
+            //         new WeatherTool(),
+            //         new UserAffinityTool(userAffinityRepo)
+            // );
 
-            List<Map<String, Object>> toolSpecs = availableTools.stream()
-                    .map(Tool::getFunctionSpec)
-                    .collect(Collectors.toList());
-
-            if (!toolSpecs.isEmpty()) {
-                requestBodyObj.put("tools", toolSpecs);
-                requestBodyObj.put("tool_choice", "auto");
-            }
-
-            String requestBody = mapper.writeValueAsString(requestBodyObj);
+            String requestBody = objectMapper.writeValueAsString(requestBodyObj);
             logger.debug("请求 Gemini API (Model: {}): {}", modelName, requestBody);
 
             HttpRequest request = HttpRequest.newBuilder()
@@ -355,12 +354,12 @@ public class BaiLianService {
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                    .timeout(Duration.ofSeconds(90))
+                    .timeout(Duration.ofMillis(this.bailianTimeoutMs))
                     .build();
 
             HttpResponse<String> response = null;
             int retryCount = 0;
-            int maxRetries = 2;
+            int maxRetries = this.bailianMaxRetries;
             
             while (retryCount <= maxRetries) {
                 try {
@@ -389,7 +388,7 @@ public class BaiLianService {
                 throw new RuntimeException("AI 服务暂时不可用 (HTTP " + response.statusCode() + ")");
             }
 
-            JsonNode root = mapper.readTree(response.body());
+            JsonNode root = objectMapper.readTree(response.body());
 
             if (root.has("error")) {
                 String errorMsg = root.path("error").path("message").asText("未知错误");
@@ -414,78 +413,9 @@ public class BaiLianService {
             JsonNode messageNode = firstChoice.get("message");
             String reply = messageNode.path("content").asText().trim();
 
-            boolean hasToolCalls = messageNode.has("tool_calls")
-                    && messageNode.get("tool_calls").isArray()
-                    && !messageNode.get("tool_calls").isEmpty();
-
-            if (hasToolCalls) {
-                JsonNode toolCall = messageNode.get("tool_calls").get(0);
-                String toolName = toolCall.path("function").path("name").asText();
-                String argsJson = toolCall.path("function").path("arguments").asText();
-
-                Tool tool = availableTools.stream()
-                        .filter(t -> t.getName().equals(toolName))
-                        .findFirst()
-                        .orElse(null);
-
-                if (tool != null) {
-                    Map<String, Object> args = objectMapper.readValue(argsJson, Map.class);
-                    String toolResult = tool.execute(args);
-                    logger.info("🔧 工具 [{}] 执行结果: {}", toolName, toolResult);
-
-                    messages.add(new HashMap<String, Object>() {{
-                        put("role", "assistant");
-                        put("content", null);
-                    }});
-
-                    messages.add(Map.of(
-                            "role", "tool",
-                            "tool_call_id", toolCall.path("id").asText(),
-                            "content", toolResult
-                    ));
-
-                    Map<String, Object> secondRequestBody = new HashMap<>();
-                    secondRequestBody.put("model", modelName);
-                    secondRequestBody.put("messages", messages);
-                    secondRequestBody.put("tools", toolSpecs);
-                    secondRequestBody.put("tool_choice", "auto");
-
-                    String secondRequest = mapper.writeValueAsString(secondRequestBody);
-                    
-                    logger.debug("➡️ 发送第二次请求（含工具结果）: {}", secondRequest);
-
-                    HttpRequest secondRequestObj = HttpRequest.newBuilder()
-                            .uri(URI.create(url))
-                            .header("Authorization", "Bearer " + apiKey)
-                            .header("Content-Type", "application/json")
-                            .POST(HttpRequest.BodyPublishers.ofString(secondRequest))
-                            .timeout(Duration.ofSeconds(60))
-                            .build();
-
-                    HttpResponse<String> secondResponse = httpClient.send(secondRequestObj, HttpResponse.BodyHandlers.ofString());
-
-                    if (secondResponse.statusCode() == 200) {
-                        JsonNode secondRoot = mapper.readTree(secondResponse.body());
-                        JsonNode secondChoices = secondRoot.path("choices");
-                        if (secondChoices.isArray() && !secondChoices.isEmpty()) {
-                            String secondReply = secondChoices.get(0).path("message").path("content").asText().trim();
-                            if (!secondReply.isEmpty()) {
-                                reply = secondReply;
-                                logger.info("✅ 工具调用后生成最终回复: {}", reply);
-                            } else {
-                                logger.warn("⚠️ 第二次响应中 content 为空，使用工具结果作为回复");
-                                reply = toolResult;
-                            }
-                        } else {
-                            logger.warn("⚠️ 第二次响应 choices 为空，使用工具结果");
-                            reply = toolResult;
-                        }
-                    } else {
-                        logger.error("❌ 第二次请求失败 HTTP {}: {}", secondResponse.statusCode(), secondResponse.body());
-                        reply = "天气查询成功，但生成回复失败...";
-                    }
-                }
-            }
+            // 当前模型 (glm-5.1) 不支持 OpenAI function calling，
+            // 不传 tools，因此跳过工具调用处理。
+            // 若后续切换到支持 tool_calls 的模型，可将上方 tools 代码恢复。
 
             if (!reply.isEmpty()) {
                 reply = reply.replaceAll("【.*?】", "").trim();
@@ -544,18 +474,16 @@ public class BaiLianService {
             messages.add(Map.of("role", "system", "content", systemPrompt));
             messages.add(Map.of("role", "user", "content", userPrompt));
 
-            // 使用 Gemini API
-            String url = "http://114.132.99.114:3000/v1/chat/completions";
-            String apiKey = "sk-WzQMkepAo1qJKub5IAzbVxTXPupYW7HVtBlxw4AlyhsRqYDk";
-            String modelName = "gemini-3-flash";
+            String url = this.agentBaseUrl;
+            String apiKey = this.agentApiKey;
+            String modelName = this.agentModel;
 
-            // 构建请求体（OpenAI 兼容格式）
             Map<String, Object> requestBodyObj = new HashMap<>();
             requestBodyObj.put("model", modelName);
             requestBodyObj.put("messages", messages);
 
-            String requestBody = mapper.writeValueAsString(requestBodyObj);
-            logger.info("➡️ 向 Gemini API 发送请求 (Model: {})", modelName);
+            String requestBody = objectMapper.writeValueAsString(requestBodyObj);
+            logger.info("➡️ 向 Agent API 发送请求 (Model: {})", modelName);
             logger.debug("请求体: {}", requestBody);
 
             HttpRequest request = HttpRequest.newBuilder()
@@ -563,7 +491,7 @@ public class BaiLianService {
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                    .timeout(Duration.ofSeconds(90))
+                    .timeout(Duration.ofMillis(this.agentTimeoutMs))
                     .build();
 
             logger.info("⏳ 等待 API 响应...");
@@ -585,8 +513,8 @@ public class BaiLianService {
             }
 
             // 解析 JSON 响应（OpenAI 格式）
-            JsonNode root = mapper.readTree(response.body());
-            logger.debug("Gemini API 响应: {}", response.body());
+            JsonNode root = objectMapper.readTree(response.body());
+            logger.debug("Agent API 响应: {}", response.body());
 
             // 检查错误
             if (root.has("error")) {
@@ -655,17 +583,14 @@ public class BaiLianService {
                 "- 工具调用由系统自动处理，你只需决定是否调用。"));
         messages.add(Map.of("role", "user", "content", enrichedPrompt));
 
-        // 使用 Gemini API
-        String url = "http://114.132.99.114:3000/v1/chat/completions";
-        String apiKey = "sk-WzQMkepAo1qJKub5IAzbVxTXPupYW7HVtBlxw4AlyhsRqYDk";
-        String modelName = "gemini-3-flash";
+        String url = this.agentBaseUrl;
+        String apiKey = this.agentApiKey;
+        String modelName = this.agentModel;
 
-        // 构造 tools 数组
         List<Map<String, Object>> toolSpecs = tools.stream()
                 .map(Tool::getFunctionSpec)
                 .collect(Collectors.toList());
 
-        // 构建请求体（OpenAI 兼容格式）
         Map<String, Object> requestBodyObj = new HashMap<>();
         requestBodyObj.put("model", modelName);
         requestBodyObj.put("messages", messages);
@@ -676,15 +601,15 @@ public class BaiLianService {
             requestBodyObj.put("tool_choice", "auto");
         }
 
-        String requestBody = mapper.writeValueAsString(requestBodyObj);
-        logger.debug("➡️ 向 Gemini API 发送请求 (Model: {}): {}", modelName, requestBody);
+        String requestBody = objectMapper.writeValueAsString(requestBodyObj);
+        logger.debug("➡️ 向 Agent API 发送请求 (Model: {}): {}", modelName, requestBody);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                .timeout(Duration.ofSeconds(90))
+                .timeout(Duration.ofMillis(this.agentTimeoutMs))
                 .build();
 
         HttpResponse<String> response;
@@ -704,8 +629,8 @@ public class BaiLianService {
         }
 
         // 解析 JSON 响应（OpenAI 格式）
-        JsonNode root = mapper.readTree(response.body());
-        logger.debug("Gemini API 响应: {}", response.body());
+        JsonNode root = objectMapper.readTree(response.body());
+        logger.debug("Agent API 响应: {}", response.body());
 
         // 检查错误
         if (root.has("error")) {
@@ -1001,8 +926,7 @@ public class BaiLianService {
             boolean allShort = list.stream().skip(list.size() - 3)
                     .allMatch(e -> e.content.length() < 8);
             if (allShort && !message.contains("@")) {
-                if (new Random().nextInt(100) < 3) {
-
+                if (ThreadLocalRandom.current().nextInt(100) < 3) {
                     return Optional.of("你们聊啥呢？突然安静了...");
                 }
             }
@@ -1011,7 +935,7 @@ public class BaiLianService {
         return Optional.empty();
     }
 
-    // ✅ 修复：将上限从 20 改为 2（更合理）
+    // 将上限从 20 改为 2（更合理）
     private boolean canReact(String groupId) {
         List<Long> history = groupReactionHistory.computeIfAbsent(groupId, k -> new ArrayList<>());
         history.removeIf(ts -> System.currentTimeMillis() - ts > 300_000); // 5分钟窗口

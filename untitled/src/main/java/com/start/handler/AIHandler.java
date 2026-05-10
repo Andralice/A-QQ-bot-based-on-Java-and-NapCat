@@ -21,8 +21,12 @@ import static com.start.util.MessageUtil.extractAts;
 public class AIHandler implements MessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(AIHandler.class);
-    private final BaiLianService aiService = new BaiLianService();
+    private final BaiLianService aiService;
     private final Random random = new Random();
+
+    public AIHandler(BaiLianService aiService) {
+        this.aiService = aiService;
+    }
 
     @Override
     public boolean match(JsonNode msg) {

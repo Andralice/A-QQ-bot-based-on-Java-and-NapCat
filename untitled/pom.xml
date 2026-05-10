@@ -56,12 +56,6 @@
             <artifactId>hanlp</artifactId>
             <version>portable-1.8.3</version>
         </dependency>
-        <!-- Selenium（会传递引入 httpclient5:5.2.1，但我们将覆盖它） -->
-        <dependency>
-            <groupId>org.seleniumhq.selenium</groupId>
-            <artifactId>selenium-java</artifactId>
-            <version>4.21.0</version>
-        </dependency>
         <dependency>
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>

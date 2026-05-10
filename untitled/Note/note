@@ -22,3 +22,12 @@ CREATE USER 'candybear'@'localhost' IDENTIFIED BY 'YourStrongPassword123!';
 
 // 把 context 加入 system prompt
 String fullPrompt = basePrompt + context + "\n用户说：" + userMessage;
+
+# 指定 commit message
+./Note/git-push.sh "修复私聊工具调用问题"
+
+# 使用默认 message（带时间戳）
+./Note/git-push.sh
+
+# 指定分支
+./Note/git-push.sh "message" master

@@ -25,20 +25,9 @@ public class LuckHandler implements MessageHandler {
         }
         plainText = plainText.trim();
 
-        boolean isAtMe = MessageUtil.isAt(msg.path("message"), botQq);
-        boolean mentionsBot = botName != null && plainText.contains(botName);
-        boolean containsKeyword = plainText.contains("幸运值") || plainText.contains("运势") ||
-                plainText.contains("魔咒") || plainText.contains("今日宜") || plainText.contains("今日不宜");
-        boolean isExactKeyword = "幸运值".equals(plainText) || "运势".equals(plainText) ||
+        // 只精确匹配：消息纯文本完全等于关键词才触发
+        return "幸运值".equals(plainText) || "运势".equals(plainText) ||
                 "今日魔咒".equals(plainText) || "魔咒".equals(plainText);
-
-        // 原逻辑：被@或提名字 + 含关键词
-        boolean originalCondition = (isAtMe || mentionsBot) && containsKeyword;
-
-        // 新增逻辑：只要整条消息就是关键词，就触发（无需@或提名字）
-        boolean exactKeywordOnly = isExactKeyword;
-
-        return originalCondition || exactKeywordOnly;
     }
 
     @Override

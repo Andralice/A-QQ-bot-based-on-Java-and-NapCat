@@ -14,10 +14,9 @@ public class JokeHandler implements MessageHandler {
     @Override
     public boolean match(JsonNode message) {
         String rawMessage = message.path("raw_message").asText();
-        return rawMessage.contains("讲个笑话") ||
-                rawMessage.contains("来个笑话") ||
-                rawMessage.equals("/joke") ||
-                rawMessage.contains("笑一个");
+        return "讲个笑话".equals(rawMessage) ||
+                "来个笑话".equals(rawMessage) ||
+                "/joke".equals(rawMessage);
     }
 
     @Override

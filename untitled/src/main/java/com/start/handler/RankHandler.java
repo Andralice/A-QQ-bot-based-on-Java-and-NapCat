@@ -35,7 +35,9 @@ public class RankHandler implements MessageHandler {
     public boolean match(JsonNode msg) {
         if (!"group".equals(msg.path("message_type").asText())) return false;
         String text = msg.path("raw_message").asText().trim();
-        for (String t : TRIGGERS) if (text.contains(t)) return true;
+        String plain = com.start.util.MessageUtil.extractPlainText(msg.path("message")).trim();
+        // 只有消息就是关键词本身，才直接触发（不走 AI）
+        for (String t : TRIGGERS) if (plain.equals(t)) return true;
         return false;
     }
 

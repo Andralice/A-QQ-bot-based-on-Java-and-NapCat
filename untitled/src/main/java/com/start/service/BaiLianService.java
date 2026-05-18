@@ -6,7 +6,11 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.agent.Tool;
 import com.start.Main;
+import com.start.agent.LuckTool;
 import com.start.agent.PokeTool;
+import com.start.agent.ProfessionTool;
+import com.start.agent.RankTool;
+import com.start.agent.ReminderTool;
 import com.start.agent.SendPrivateTool;
 import com.start.agent.UserAffinityTool;
 import com.start.agent.UserAliasTool;
@@ -377,15 +381,26 @@ public class BaiLianService {
 
     ⛔ 以上8个是唯一的工具！禁止自创其他工具名！
 
-    7. 谁是卧底流程（严格按以下步骤，不要省略）：
-       a. 等报名：有人明确说\"1\"\"我\"\"我要玩\"\"来\"才算报名。@你但没表态的不算。
-       b. 凑够3人后，等3秒没人新加入就自动开始，别再问\"还有人吗\"。
-       c. 开始后：选一个卧底，给每个玩家用send_private_msg各发一次词（平民相同词，卧底不同词）。
-          记录一个名单：玩家QQ → 词。发给一个人后标记\"已发\"，别重复发。
-       d. 公屏说\"词已私发，从XX开始，每人一句话描述\"。
-       e. 听一轮描述后发起投票。被投最多者出局。更新存活名单。
-       f. 出局≠卧底时继续下一轮。卧底被投出=游戏结束。
-       g. 游戏全程不要输出<tool_call>（发私聊除外）。用自然语言回复。
+    9. get_ranking — 查排行榜（参数 action=help/message/luck/affinity, group_id）
+    10. set_reminder — 定时提醒（参数 delay/message/user_id/group_id）
+    11. get_luck — 查幸运值（target_user_id 或 target_name）。直接用 target_name 即可，别先调 resolve_alias
+    12. get_profession — 查职业和战力（target_user_id 或 target_name），直接用 target_name
+
+    7. 谁是卧底流程（严格按以下步骤）：
+       【报名阶段】
+       - 游戏开始后5秒内的\"1\"\"我\"\"玩\"才算报名，超时或游戏开始后的新报名一律忽略
+       - 人数够了直接开始，别墨迹
+       【发词阶段】
+       - 选卧底→给每人send_private_msg发词。每人只发一次。
+       - 自己心里记下：谁是卧底、平民词是什么、卧底词是什么
+       【描述阶段】
+       - 只看玩家发的消息。非玩家的闲聊一概忽略，不要回复
+       - 每个玩家描述一句话，全说完进入投票
+       【投票阶段】
+       - 说\"开始投票，5秒内回复你要投的人\"
+       - 只统计5秒内的投票消息。每人的投票消息格式必须是\"投XX\"
+       - 被投最多者出局。宣布结果：\"XX出局，是XX\"（平民/卧底）
+       - 游戏结束就说\"本轮结束\"，清空状态
 
     8. 猜数字：想好1-100的数，记住不换。群友猜，你说\"大了\"\"小了\"，猜对说\"恭喜\"。
     9. 成语接龙：起头后记住尾字，检查下一个人首字是否匹配。""";
@@ -497,7 +512,11 @@ public class BaiLianService {
                     new UserAliasTool(userAliasRepo, String.valueOf(BotConfig.getBotQq())),
                     new SendPrivateTool(botInstance),
                     new PokeTool(botInstance),
-                    new VoiceTool(botInstance)
+                    new VoiceTool(botInstance),
+                    new RankTool(),
+                    new ReminderTool(),
+                    new LuckTool(),
+                    new ProfessionTool()
             );
 
             String requestBody = objectMapper.writeValueAsString(requestBodyObj);

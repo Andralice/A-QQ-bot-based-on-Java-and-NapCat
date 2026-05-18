@@ -223,14 +223,14 @@ public class DailyProfessionHandler implements MessageHandler {
      * 职业条目内部类
      */
     public static class ProfessionEntry {
-        final String name;
-        final int tier;
-        final String rarity;
-        final String description;
-        final int minPower;  // 最低战力
-        final int maxPower;  // 最高战力
+        public final String name;
+        public final int tier;
+        public final String rarity;
+        public final String description;
+        public final int minPower;
+        public final int maxPower;
 
-        ProfessionEntry(String name, int tier, String rarity, String description, int minPower, int maxPower) {
+        public ProfessionEntry(String name, int tier, String rarity, String description, int minPower, int maxPower) {
             this.name = name;
             this.tier = tier;
             this.rarity = rarity;

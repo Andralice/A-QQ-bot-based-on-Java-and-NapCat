@@ -44,23 +44,26 @@ public class GameStateService {
         public String getDescription() {
             if (players.isEmpty()) return "";
             StringBuilder sb = new StringBuilder("\n【🎮 谁是卧底进行中】");
-            sb.append("\n阶段：").append(phase == SpyPhase.REGISTERING ? "报名中（凑够3人自动开始）"
-                    : phase == SpyPhase.STARTED ? "描述中（每人一句话）" : "投票中");
-            sb.append("\n已报名(").append(players.size()).append("人)：");
+            sb.append("\n阶段：").append(phase == SpyPhase.REGISTERING ? "报名中" : phase == SpyPhase.STARTED ? "游戏中" : "投票中");
+            sb.append(" | 玩家(").append(players.size()).append(")：");
             for (String p : players) {
-                sb.append(p);
-                if (sentWords.contains(p)) sb.append("(词已发)");
+                sb.append(displayName(p)).append(sentWords.contains(p) ? "✓" : "?");
+                if (alive.contains(p)) sb.append("");
+                else sb.append("(已出局)");
                 sb.append(" ");
             }
             if (spyUserId != null) {
-                sb.append("\n卧底：").append(spyUserId);
-                sb.append(" | 平民词：").append(civilianWord).append(" | 卧底词：").append(spyWord);
+                sb.append("\n卧底:").append(displayName(spyUserId)).append(" 平民词:").append(civilianWord).append(" 卧底词:").append(spyWord);
             }
-            if (!alive.isEmpty()) {
-                sb.append("\n存活：").append(String.join(" ", alive));
+            if (!alive.isEmpty() && !alive.equals(players)) {
+                sb.append("\n存活:").append(alive.stream().map(this::displayName).collect(java.util.stream.Collectors.joining(" ")));
             }
-            sb.append("\n你的任务：严格按照游戏流程操作。当前阶段是【").append(phase).append("】。");
             return sb.toString();
+        }
+
+        private String displayName(String uid) {
+            var alias = new com.start.repository.UserAliasRepository().getBestAlias(uid, "0");
+            return alias.orElse(uid);
         }
     }
 

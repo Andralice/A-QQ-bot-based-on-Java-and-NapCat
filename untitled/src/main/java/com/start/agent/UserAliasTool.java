@@ -111,10 +111,19 @@ public class UserAliasTool implements Tool {
             return "「" + alias + "」就是糖果熊自己";
 
         var uid = aliasRepo.resolveAlias(alias, groupId);
+        if (uid.isEmpty()) {
+            // 别称表没找到，再查 users 昵称表
+            try (var c = com.start.config.DatabaseConfig.getConnection();
+                 var ps = c.prepareStatement("SELECT user_id FROM users WHERE nickname=? LIMIT 1")) {
+                ps.setString(1, alias.trim());
+                try (var rs = ps.executeQuery()) {
+                    if (rs.next()) uid = java.util.Optional.of(rs.getString("user_id"));
+                }
+            } catch (Exception ignored) {}
+        }
         if (uid.isPresent()) {
             String qq = uid.get();
             var loc = aliasRepo.getLocation(qq, groupId != null ? groupId : "0");
-            // 返回 @ 格式，告诉 AI 直接用 @ 回复用户，不要发 QQ 号
             return "「" + alias + "」的QQ是" + qq + "。" +
                    "请在回复中直接 @ 他：[CQ:at,qq=" + qq + "] " + alias + "，不要直接输出QQ号。";
         }

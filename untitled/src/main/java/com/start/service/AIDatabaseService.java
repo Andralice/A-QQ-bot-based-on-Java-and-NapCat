@@ -26,7 +26,7 @@ public class AIDatabaseService {
     public void recordUserMessage(String sessionId, String userId, String prompt, String groupId,Long isagent) {
         try {
             // 1. 更新用户信息
-            userRepo.createOrUpdateUser(userId, "未知用户");
+            userRepo.createOrUpdateUser(userId, "");
             userRepo.incrementMessageCount(userId);
 
             // 2. 保存消息

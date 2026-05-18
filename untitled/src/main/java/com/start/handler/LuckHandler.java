@@ -27,8 +27,10 @@ public class LuckHandler implements MessageHandler {
 
         boolean isAtMe = MessageUtil.isAt(msg.path("message"), botQq);
         boolean mentionsBot = botName != null && plainText.contains(botName);
-        boolean containsKeyword = plainText.contains("幸运值") || plainText.contains("运势");
-        boolean isExactKeyword = "幸运值".equals(plainText) || "运势".equals(plainText);
+        boolean containsKeyword = plainText.contains("幸运值") || plainText.contains("运势") ||
+                plainText.contains("魔咒") || plainText.contains("今日宜") || plainText.contains("今日不宜");
+        boolean isExactKeyword = "幸运值".equals(plainText) || "运势".equals(plainText) ||
+                "今日魔咒".equals(plainText) || "魔咒".equals(plainText);
 
         // 原逻辑：被@或提名字 + 含关键词
         boolean originalCondition = (isAtMe || mentionsBot) && containsKeyword;
@@ -59,18 +61,33 @@ public class LuckHandler implements MessageHandler {
         }
 
         int luck = LuckUtil.getDailyLuck(userId);
+        var spell = LuckUtil.getDailySpell(userId);
         String Atthis =BotConfig.getAt(userId);
+        String raw = msg.path("raw_message").asText().trim();
+        boolean showSpell = raw.contains("魔咒") || raw.contains("宜") || raw.contains("不宜");
+
         String reply;
         if (luck >= 90) {
-            reply =Atthis +"🌟 欧气爆棚！您今天的幸运值是 " + luck + "！";
+            reply =Atthis +"🌟 欧气爆棚！今天幸运值 " + luck;
         } else if (luck >= 70) {
-            reply =Atthis + "😊 运气不错哦～您今天的幸运值是 " + luck + "！";
+            reply =Atthis + "😊 运气不错～今天幸运值 " + luck;
         } else if (luck >= 40) {
-            reply =Atthis +"🙂 平平无奇的一天，幸运值：" + luck + "。";
+            reply =Atthis +"🙂 平平无奇，幸运值 " + luck;
         } else {
-            reply =Atthis + "😞 今天小心点...您的幸运值只有 " + luck + "。";
+            reply =Atthis + "😞 今天小心，幸运值只有 " + luck;
+        }
+
+        if (showSpell) {
+            reply += "\n" + spell.mood() + "\n✅ " + spell.doSpell() + " | ❌ " + spell.avoidSpell();
         }
 
         bot.sendReply(msg, reply);
+        // 记录到 AI 上下文
+        var baiLian = bot.getBaiLianService();
+        if (baiLian != null && msg.has("group_id")) {
+            baiLian.recordBotAction(String.valueOf(groupId), String.valueOf(userId),
+                    msg.path("sender").path("nickname").asText(""), "运势查询",
+                    "幸运值:" + luck + " " + spell.doSpell() + " " + spell.avoidSpell());
+        }
     }
 }

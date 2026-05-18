@@ -11,7 +11,6 @@ public class PokeTool implements Tool {
     private final Main bot;
     private final Map<String, Long> lastPokeTime = new HashMap<>();
     private static final long COOLDOWN_MS = 300_000; // 5分钟冷却，防止滥用
-
     public PokeTool(Main bot) { this.bot = bot; }
 
     @Override public String getName() { return "send_poke"; }

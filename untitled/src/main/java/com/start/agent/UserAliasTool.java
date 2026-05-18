@@ -96,7 +96,7 @@ public class UserAliasTool implements Tool {
         String loc = (String) args.get("location");
         if (userId == null || loc == null || loc.trim().isEmpty())
             return "缺少参数 target_user_id/location";
-        aliasRepo.updateLocation(userId, loc.trim(), isPrimary);
+        aliasRepo.updateLocation(userId, (String) args.getOrDefault("group_id", "0"), loc.trim(), isPrimary);
         String tier = isPrimary ? "主要" : "次要";
         return "已记录 " + userId + " 的" + tier + "地点：" + loc.trim();
     }
@@ -113,7 +113,7 @@ public class UserAliasTool implements Tool {
         var uid = aliasRepo.resolveAlias(alias, groupId);
         if (uid.isPresent()) {
             String qq = uid.get();
-            var loc = aliasRepo.getLocation(qq);
+            var loc = aliasRepo.getLocation(qq, groupId != null ? groupId : "0");
             // 返回 @ 格式，告诉 AI 直接用 @ 回复用户，不要发 QQ 号
             return "「" + alias + "」的QQ是" + qq + "。" +
                    "请在回复中直接 @ 他：[CQ:at,qq=" + qq + "] " + alias + "，不要直接输出QQ号。";

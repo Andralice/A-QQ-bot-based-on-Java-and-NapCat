@@ -62,14 +62,14 @@ public class ReminderService {
         task.start(scheduler);
     }
 
-    // ===== 新增：一次性定时提醒 =====
+    // ===== 新增：一次性定时提醒（私聊） =====
     public void remindAt(long userId, String message, LocalDateTime triggerTime) {
         if (!enabled) return;
         stopReminding(userId);
 
         long delaySec = Duration.between(LocalDateTime.now(), triggerTime).getSeconds();
         if (delaySec <= 0) {
-            botInstance.sendPrivateReply(userId, "⚠️ 提醒时间已过期。");
+            botInstance.sendPrivateReply(userId, "提醒时间已过期。");
             return;
         }
 
@@ -82,6 +82,72 @@ public class ReminderService {
         }, delaySec, TimeUnit.SECONDS);
 
         activeTasks.put(userId, new OneTimeTask(future));
+    }
+
+    // ===== 新增：一次性定时提醒（群聊） =====
+    public void remindAtGroup(long groupId, long userId, String message, LocalDateTime triggerTime) {
+        if (!enabled) return;
+        String key = "group_" + groupId + "_" + userId;
+        stopReminding(userId);
+
+        long delaySec = Duration.between(LocalDateTime.now(), triggerTime).getSeconds();
+        if (delaySec <= 0) {
+            botInstance.sendGroupReply(groupId, "[CQ:at,qq=" + userId + "] 提醒时间已过期。");
+            return;
+        }
+
+        ScheduledFuture<?> future = scheduler.schedule(() -> {
+            if (enabled) {
+                botInstance.sendGroupReply(groupId, "[CQ:at,qq=" + userId + "] " + message);
+                logger.info("✅ 群提醒已发送 group={} user={}", groupId, userId);
+            }
+            activeTasks.remove(userId);
+        }, delaySec, TimeUnit.SECONDS);
+
+        activeTasks.put(userId, new OneTimeTask(future));
+    }
+
+    // ===== 新增：延迟私聊某人（可用于定时提醒别人） =====
+    public void remindPrivate(long groupId, long targetUserId, String message, LocalDateTime triggerTime) {
+        if (!enabled) return;
+
+        long delaySec = Duration.between(LocalDateTime.now(), triggerTime).getSeconds();
+        if (delaySec <= 0) {
+            botInstance.sendPrivateReply(targetUserId, groupId, "提醒时间已过期：" + message);
+            return;
+        }
+
+        ScheduledFuture<?> future = scheduler.schedule(() -> {
+            if (enabled) {
+                botInstance.sendPrivateReply(targetUserId, groupId, message);
+                logger.info("✅ 延迟私聊已发送 target={}", targetUserId);
+            }
+        }, delaySec, TimeUnit.SECONDS);
+
+        activeTasks.put(targetUserId, new OneTimeTask(future));
+    }
+
+    /** 解析相对时间字符串（如"30分钟""1小时""5秒"）为秒数 */
+    public static long parseDelaySeconds(String timeStr) {
+        if (timeStr == null) return 0;
+        timeStr = timeStr.trim();
+        try {
+            if (timeStr.contains("小时") || timeStr.contains("时")) {
+                String num = timeStr.replaceAll("[^0-9.]", "");
+                return (long) (Double.parseDouble(num) * 3600);
+            }
+            if (timeStr.contains("分钟") || timeStr.contains("分")) {
+                String num = timeStr.replaceAll("[^0-9.]", "");
+                return (long) (Double.parseDouble(num) * 60);
+            }
+            if (timeStr.contains("秒")) {
+                String num = timeStr.replaceAll("[^0-9.]", "");
+                return (long) Double.parseDouble(num);
+            }
+            return Long.parseLong(timeStr); // 纯数字，按秒处理
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     // ===== 新增：每日定时提醒 =====

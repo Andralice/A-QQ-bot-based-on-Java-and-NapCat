@@ -56,22 +56,22 @@ public class UserAliasRepository extends BaseRepository {
     }
 
     /** 更新地点。primary 覆盖 primary，secondary 覆盖 secondary */
-    public void updateLocation(String userId, String location, boolean isPrimary) {
+    public void updateLocation(String userId, String groupId, String location, boolean isPrimary) {
         String col = isPrimary ? "primary_location" : "secondary_location";
-        String sql = "UPDATE user_aliases SET " + col + "=?, location_updated_at=NOW() WHERE target_user_id=?";
-        int rows = executeUpdate(sql, location.trim(), userId).getDataOrElse(0);
+        String sql = "UPDATE user_aliases SET " + col + "=?, location_updated_at=NOW() WHERE target_user_id=? AND (group_id=? OR group_id IS NULL)";
+        int rows = executeUpdate(sql, location.trim(), userId, groupId).getDataOrElse(0);
         if (rows == 0) {
-            // 首次记录地点时，创建一个占位行（alias_name 用特殊值，不会被当别称显示）
-            executeUpdate("INSERT INTO user_aliases (target_user_id,alias_name,alias_type,set_by_user_id," + col + ",location_updated_at) " +
-                    "VALUES (?,'__location_only__','OBJECTIVE',?,?,NOW())", userId, userId, location.trim());
+            executeUpdate("INSERT INTO user_aliases (target_user_id,group_id,alias_name,alias_type,set_by_user_id," + col + ",location_updated_at) " +
+                    "VALUES (?,?,'__location_only__','OBJECTIVE',?,?,NOW())", userId, groupId, userId, location.trim());
         }
-        logger.info("📍 地点{}: user={} loc={}", isPrimary ? "(主)" : "(次)", userId, location);
+        logger.info("📍 地点{}: user={} group={} loc={}", isPrimary ? "(主)" : "(次)", userId, groupId, location);
     }
 
-    /** 获取最佳地点：primary > secondary */
-    public Optional<String> getLocation(String userId) {
+    /** 获取最佳地点：primary > secondary，按群过滤 */
+    public Optional<String> getLocation(String userId, String groupId) {
         var r = executeQuerySingle(
                 "SELECT primary_location, secondary_location FROM user_aliases WHERE target_user_id=? " +
+                "AND (group_id=? OR group_id IS NULL) " +
                 "AND (primary_location IS NOT NULL OR secondary_location IS NOT NULL) " +
                 "ORDER BY location_updated_at DESC LIMIT 1",
                 rs -> {
@@ -80,17 +80,18 @@ public class UserAliasRepository extends BaseRepository {
                         if (p != null && !p.isEmpty()) return p;
                         return rs.getString("secondary_location");
                     } catch (SQLException e) { return null; }
-                }, userId);
+                }, userId, groupId);
         return Optional.ofNullable(r.isSuccess() ? r.getData() : null);
     }
 
-    /** 最佳别称：主观 > 客观 > 无 */
-    public Optional<String> getBestAlias(String targetUserId) {
+    /** 最佳别称：主观 > 客观 > 无，按群过滤，排除占位符 */
+    public Optional<String> getBestAlias(String targetUserId, String groupId) {
         for (String type : List.of("SUBJECTIVE", "OBJECTIVE")) {
             var r = executeQuerySingle(
-                    "SELECT alias_name FROM user_aliases WHERE target_user_id=? AND alias_type=? LIMIT 1",
+                    "SELECT alias_name FROM user_aliases WHERE target_user_id=? AND alias_type=? " +
+                    "AND (group_id=? OR group_id IS NULL) AND alias_name != '__location_only__' LIMIT 1",
                     rs -> { try { return rs.getString("alias_name"); } catch (SQLException e) { return null; } },
-                    targetUserId, type);
+                    targetUserId, type, groupId);
             if (r.isSuccess() && r.getData() != null) return Optional.of(r.getData());
         }
         return Optional.empty();
@@ -135,14 +136,15 @@ public class UserAliasRepository extends BaseRepository {
                 while (rs.next()) {
                     String uid = rs.getString("target_user_id");
                     AliasInfo info = map.computeIfAbsent(uid, k -> new AliasInfo());
-                    if (info.bestAlias == null) info.bestAlias = rs.getString("alias_name");
+                    String aName = rs.getString("alias_name");
+                    if (info.bestAlias == null && !"__location_only__".equals(aName)) info.bestAlias = aName;
                     String loc1 = rs.getString("primary_location");
                     String loc2 = rs.getString("secondary_location");
                     if (info.primaryLocation == null && loc1 != null && !loc1.isEmpty())
                         info.primaryLocation = loc1;
                     if (info.secondaryLocation == null && loc2 != null && !loc2.isEmpty())
                         info.secondaryLocation = loc2;
-                    info.aliases.add(rs.getString("alias_name"));
+                    if (!"__location_only__".equals(aName)) info.aliases.add(aName);
                 }
             }
         } catch (SQLException e) { logger.error("查询群别称失败", e); }

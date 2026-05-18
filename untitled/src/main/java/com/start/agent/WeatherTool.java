@@ -51,7 +51,7 @@ public class WeatherTool implements Tool {
 
         if (city == null || city.trim().isEmpty() || "UNKNOWN".equalsIgnoreCase(city.trim())) {
             if (userId != null && !userId.isEmpty()) {
-                Optional<String> loc = aliasRepo.getLocation(userId);
+                Optional<String> loc = aliasRepo.getLocation(userId, (String) args.getOrDefault("group_id", "0"));
                 if (loc.isPresent()) { city = loc.get(); }
                 else { return "我不知道你在哪个城市，可以告诉我吗？比如'我在北京'"; }
             } else { return "我不知道你在哪个城市，可以告诉我吗？"; }
@@ -61,29 +61,39 @@ public class WeatherTool implements Tool {
 
         // 查完后写入 secondary_location
         if (userId != null && !userId.isEmpty() && !"UNKNOWN".equalsIgnoreCase(originalCity)) {
-            aliasRepo.updateLocation(userId, originalCity, false);
+            aliasRepo.updateLocation(userId, (String) args.getOrDefault("group_id", "0"), originalCity, false);
         }
 
         try {
-            String encoded = URLEncoder.encode(originalCity, StandardCharsets.UTF_8);
-            String geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" + encoded + "&count=1&language=zh";
+            // 尝试多个搜索关键词（去掉区/县/市后缀，加省份前缀等）
+            String[] searchNames = {originalCity};
+            if (originalCity.endsWith("区") || originalCity.endsWith("县") || originalCity.endsWith("市")) {
+                searchNames = new String[]{originalCity, originalCity.substring(0, originalCity.length() - 1)};
+            }
+            // 注：如果用户之前设置过所在地，可能带了省份信息在上下文中，这里保持简单
 
-            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(geoUrl))
-                    .timeout(java.time.Duration.ofSeconds(10)).build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return "无法连接地理服务，稍后再试。";
-
-            JsonNode geo = mapper.readTree(resp.body());
-            if (!geo.has("results") || geo.get("results").size() == 0) {
-                // 去掉 language=zh 重试
-                geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" + encoded + "&count=1";
-                req = HttpRequest.newBuilder().uri(URI.create(geoUrl))
+            JsonNode geo = null;
+            for (String name : searchNames) {
+                String encoded = URLEncoder.encode(name, StandardCharsets.UTF_8);
+                String geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" + encoded + "&count=1&language=zh";
+                HttpRequest req = HttpRequest.newBuilder().uri(URI.create(geoUrl))
                         .timeout(java.time.Duration.ofSeconds(10)).build();
-                resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-                geo = mapper.readTree(resp.body());
-                if (!geo.has("results") || geo.get("results").size() == 0) {
-                    return "未找到城市 [" + originalCity + "]，请确认名称。";
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 200) {
+                    geo = mapper.readTree(resp.body());
+                    if (geo.has("results") && geo.get("results").size() > 0) break;
+                    // 不带 language=zh 重试
+                    geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" + encoded + "&count=1";
+                    req = HttpRequest.newBuilder().uri(URI.create(geoUrl))
+                            .timeout(java.time.Duration.ofSeconds(10)).build();
+                    resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                    geo = mapper.readTree(resp.body());
+                    if (geo.has("results") && geo.get("results").size() > 0) break;
                 }
+            }
+
+            if (geo == null || !geo.has("results") || geo.get("results").size() == 0) {
+                return "未找到城市 [" + originalCity + "]，试试换个写法（如去掉'区''县'）？";
             }
 
             JsonNode r = geo.get("results").get(0);
@@ -97,12 +107,12 @@ public class WeatherTool implements Tool {
                     "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code" +
                     "&timezone=auto&forecast_days=1", lat, lon);
 
-            req = HttpRequest.newBuilder().uri(URI.create(wUrl))
+            HttpRequest wReq = HttpRequest.newBuilder().uri(URI.create(wUrl))
                     .timeout(java.time.Duration.ofSeconds(10)).build();
-            resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return "天气服务暂不可用。";
+            HttpResponse<String> wResp = http.send(wReq, HttpResponse.BodyHandlers.ofString());
+            if (wResp.statusCode() != 200) return "天气服务暂不可用。";
 
-            JsonNode w = mapper.readTree(resp.body());
+            JsonNode w = mapper.readTree(wResp.body());
             JsonNode cur = w.path("current");
             if (cur.isMissingNode()) return "未获取到当前天气。";
 

@@ -15,6 +15,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static com.start.util.MessageUtil.extractAts;
 
@@ -24,6 +27,11 @@ import static com.start.util.MessageUtil.extractAts;
 public class AIHandler implements MessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(AIHandler.class);
+    private static final ExecutorService aiExecutor = Executors.newFixedThreadPool(8, r -> {
+        Thread t = new Thread(r, "AI-Worker");
+        t.setDaemon(true);
+        return t;
+    });
     private final BaiLianService aiService;
     private final Random random = new Random();
 
@@ -101,7 +109,7 @@ public class AIHandler implements MessageHandler {
             BaiLianService.Reaction r = reaction.get();
             if (r.needsAI) {
                 // 异步调用 generate
-                new Thread(() -> {
+                aiExecutor.submit(() -> {
                     String reply = aiService.generate("group_" + groupId + "_" + userId, String.valueOf(userId), r.prompt, String.valueOf(groupId),String.valueOf(nickname));
                     if (!reply.trim().isEmpty() && !reply.equals("抱歉，刚才走神了...") && !reply.equals("嗯...")) {
                         sendSplitGroupReplies(bot, groupId, reply);
@@ -110,7 +118,7 @@ public class AIHandler implements MessageHandler {
                     } else {
                         bot.sendGroupReply(groupId, "刚刚走神了，再说一遍？");
                     }
-                }).start();
+                });
             } else {
                 sendSplitGroupReplies(bot, groupId, r.text);
             }

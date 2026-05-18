@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.start.config.BotConfig;
 import com.start.config.DatabaseConfig;
+import com.start.handler.CPTracker;
 import com.start.handler.HandlerRegistry;
+import com.start.repository.GroupMessageStatsRepository;
 import com.start.repository.MessageRepository;
 import com.start.repository.UserAffinityRepository;
 import com.start.service.*;
@@ -15,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -195,6 +198,35 @@ public class Main extends WebSocketClient {
     @Override
     public void onOpen(ServerHandshake handshakedata) {
         logger.info("✅ 已连接 NapCat WebSocket");
+        // 异步拉取预加载群的成员昵称写入数据库
+        new Thread(() -> seedGroupNicknames()).start();
+    }
+
+    private void seedGroupNicknames() {
+        try { Thread.sleep(3000); } catch (InterruptedException e) { return; } // 等连接稳定
+        for (Long groupId : BotConfig.getAllowedGroups()) {
+            String gid = String.valueOf(groupId);
+            try {
+                var params = MAPPER.createObjectNode();
+                params.put("group_id", Long.parseLong(gid));
+                var future = callOneBotApi("get_group_member_list", params);
+                var resp = future.get(15, java.util.concurrent.TimeUnit.SECONDS);
+                if (resp != null && resp.has("data")) {
+                    int count = 0;
+                    for (JsonNode m : resp.path("data")) {
+                        String uid = String.valueOf(m.path("user_id").asLong());
+                        String card = m.path("card").asText();
+                        String nick = m.path("nickname").asText();
+                        String name = !card.isEmpty() ? card : nick;
+                        if (!name.isEmpty() && !"未知用户".equals(name) && uid.length() > 4) {
+                            this.userService.getOrCreateUser(uid, name);
+                            count++;
+                        }
+                    }
+                    logger.info("📋 群 {} 昵称已写入: {} 人", gid, count);
+                }
+            } catch (Exception e) { logger.warn("群 {} 昵称拉取失败: {}", gid, e.getMessage()); }
+        }
     }
 
     @Override
@@ -256,6 +288,26 @@ public class Main extends WebSocketClient {
             }
 
             if (isAllowed) {
+                // 记录群消息统计+昵称（每条都计）
+                if ("group".equals(messageType)) {
+                    String gid = String.valueOf(event.path("group_id").asLong());
+                    String uid = String.valueOf(userId);
+                    GroupMessageStatsRepository.recordMessage(gid, uid);
+                    // 更新用户昵称（从群名片/QQ昵称）
+                    String card = event.path("sender").path("card").asText();
+                    String nick = event.path("sender").path("nickname").asText();
+                    String displayName = !card.isEmpty() ? card : nick;
+                    if (!displayName.isEmpty() && !"未知用户".equals(displayName)) {
+                        this.userService.getOrCreateUser(uid, displayName);
+                    }
+                    // 记录 @ 互动 → CP 追踪
+                    List<Long> ats = com.start.util.MessageUtil.extractAts(event.path("message"));
+                    for (Long atQq : ats) {
+                        if (atQq != selfId) {
+                            CPTracker.recordInteraction(gid, uid, String.valueOf(atQq));
+                        }
+                    }
+                }
                 String rawMessage = event.path("raw_message").asText();
                 if ("private".equals(messageType)) {
 
@@ -424,12 +476,18 @@ public class Main extends WebSocketClient {
             params.put("message", reply);
             this.send(action.toString());
             logger.debug("📤 已发送群聊回复: {}", reply);
+            if (this.baiLianService != null) {
+                this.baiLianService.recordGroupContext(
+                        String.valueOf(groupId), "candybear", "糖果熊", reply, "bot_reply");
+            }
         } catch (Exception e) {
             logger.error("❌ 发送群聊回复失败", e);
         }
     }
 
     // ===== Getter 方法 =====
+
+    public BaiLianService getBaiLianService() { return this.baiLianService; }
 
     public OneBotWsService getOneBotWsService() {
         return oneBotWsService;

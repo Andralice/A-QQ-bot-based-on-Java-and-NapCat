@@ -51,9 +51,16 @@ public class UserRepository extends BaseRepository {
     }
 
     private void updateUser(String userId, String nickname) throws SQLException {
-        String sql = "UPDATE users SET nickname = ?, last_active = NOW(), " +
-                "total_messages = total_messages + 1 WHERE user_id = ?";
-        executeUpdate(sql, nickname, userId).getDataOrElse(0);
+        // 只有真正的好昵称才更新，避免空字符串或"未知用户"覆盖正确昵称
+        if (nickname != null && !nickname.isEmpty() && !"未知用户".equals(nickname)) {
+            String sql = "UPDATE users SET nickname = ?, last_active = NOW(), " +
+                    "total_messages = total_messages + 1 WHERE user_id = ?";
+            executeUpdate(sql, nickname, userId).getDataOrElse(0);
+        } else {
+            String sql = "UPDATE users SET last_active = NOW(), " +
+                    "total_messages = total_messages + 1 WHERE user_id = ?";
+            executeUpdate(sql, userId).getDataOrElse(0);
+        }
     }
 
     /**

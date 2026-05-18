@@ -154,25 +154,43 @@ public class DailyProfessionHandler implements MessageHandler {
         Random rand = new Random();
         double roll = rand.nextDouble() * 100;
 
-        // 权重分配：传说 3%, 史诗 10%, 稀有 27%, 普通 60%
         double cumulative = 0;
-        cumulative += 3;  if (roll < cumulative) return drawByTier(5); // 传说
-        cumulative += 10; if (roll < cumulative) return drawByTier(4); // 史诗
-        cumulative += 27; if (roll < cumulative) return drawByTier(3); // 稀有
-        cumulative += 60; return drawByTier(rand.nextInt(2) + 1);     // 普通（1-2阶）
+        cumulative += 3;  if (roll < cumulative) return drawByTier(5, rand);
+        cumulative += 10; if (roll < cumulative) return drawByTier(4, rand);
+        cumulative += 27; if (roll < cumulative) return drawByTier(3, rand);
+        cumulative += 60; return drawByTier(rand.nextInt(2) + 1, rand);
+    }
+
+    /** 确定性抽取（用户+日期种子），供排行榜使用 */
+    public static ProfessionEntry drawForUser(long userId) {
+        String seed = "profession-" + userId + "-" + java.time.LocalDate.now();
+        Random rand = new Random(seed.hashCode());
+        double roll = rand.nextDouble() * 100;
+
+        double cumulative = 0;
+        cumulative += 3;  if (roll < cumulative) return drawByTier(5, rand);
+        cumulative += 10; if (roll < cumulative) return drawByTier(4, rand);
+        cumulative += 27; if (roll < cumulative) return drawByTier(3, rand);
+        cumulative += 60; return drawByTier(rand.nextInt(2) + 1, rand);
+    }
+
+    /** 获取用户的今日战力（确定性） */
+    public static int getCombatPower(long userId) {
+        ProfessionEntry p = drawForUser(userId);
+        String seed = "power-" + userId + "-" + java.time.LocalDate.now();
+        Random rand = new Random(seed.hashCode());
+        return p.minPower + rand.nextInt(p.maxPower - p.minPower + 1);
     }
 
     /**
      * 从指定位阶中随机抽取
      */
-    private ProfessionEntry drawByTier(int targetTier) {
+    private static ProfessionEntry drawByTier(int targetTier, Random rand) {
         List<ProfessionEntry> tierProfessions = PROFESSIONS.stream()
                 .filter(p -> p.tier == targetTier)
                 .toList();
-        if (tierProfessions.isEmpty()) {
-            return PROFESSIONS.get(0); // fallback
-        }
-        return tierProfessions.get(new Random().nextInt(tierProfessions.size()));
+        if (tierProfessions.isEmpty()) return PROFESSIONS.get(0);
+        return tierProfessions.get(rand.nextInt(tierProfessions.size()));
     }
 
     /**
@@ -204,7 +222,7 @@ public class DailyProfessionHandler implements MessageHandler {
     /**
      * 职业条目内部类
      */
-    private static class ProfessionEntry {
+    public static class ProfessionEntry {
         final String name;
         final int tier;
         final String rarity;

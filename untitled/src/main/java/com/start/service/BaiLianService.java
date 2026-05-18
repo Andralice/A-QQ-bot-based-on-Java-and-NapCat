@@ -410,8 +410,8 @@ public class BaiLianService {
             }
             if (!aliasInfoMap.containsKey(userId)) {
                 UserAliasRepository.AliasInfo info = new UserAliasRepository.AliasInfo();
-                userAliasRepo.getBestAlias(userId).ifPresent(a -> { info.bestAlias = a; info.aliases.add(a); });
-                userAliasRepo.getLocation(userId).ifPresent(l -> info.primaryLocation = l);
+                userAliasRepo.getBestAlias(userId, groupId != null ? groupId : "0").ifPresent(a -> { info.bestAlias = a; info.aliases.add(a); });
+                userAliasRepo.getLocation(userId, groupId != null ? groupId : "0").ifPresent(l -> info.primaryLocation = l);
                 if (info.bestAlias != null) aliasInfoMap.put(userId, info);
             }
             if (!aliasInfoMap.isEmpty()) {
@@ -435,7 +435,7 @@ public class BaiLianService {
             }
 
             // 当前用户的所在地（用于天气默认值）
-            Optional<String> userLoc = userAliasRepo.getLocation(userId);
+            Optional<String> userLoc = userAliasRepo.getLocation(userId, groupId != null ? groupId : "0");
             if (userLoc.isPresent()) {
                 systemPrompt += "\n\n当前用户所在地：" + userLoc.get() + "（查天气时若未指定城市则默认使用）";
             }
@@ -1050,6 +1050,11 @@ public class BaiLianService {
         if (deque != null) {
             deque.removeIf(e -> System.currentTimeMillis() - e.timestamp > 300_000);
         }
+    }
+
+    public void recordBotAction(String groupId, String userId, String nick, String feature, String detail) {
+        String msg = "糖果熊 为 " + nick + "(" + userId + ") 执行了【" + feature + "】: " + detail;
+        recordGroupContext(groupId, userId, nick, msg, "bot_action");
     }
 
     // ===== 辅助判断 =====

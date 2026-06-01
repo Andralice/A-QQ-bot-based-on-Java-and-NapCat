@@ -31,12 +31,20 @@ public class RankHandler implements MessageHandler {
             "群排行", "排行榜", "有什么榜", "榜单", "排名"
     );
 
+    // 匹配 "幸运排行-3" 这类详情查询
+    private static final java.util.regex.Pattern DETAIL_PATTERN =
+            java.util.regex.Pattern.compile("(幸运|发言|好运|好感|职业|战力).*-(\\d+)");
+
     @Override
     public boolean match(JsonNode msg) {
         if (!"group".equals(msg.path("message_type").asText())) return false;
         String text = msg.path("raw_message").asText().trim();
+        if (!"group".equals(msg.path("message_type").asText())) return false;
+        String raw = msg.path("raw_message").asText().trim();
+        // 详情查询："幸运排行-3"
+        if (DETAIL_PATTERN.matcher(raw).find()) return true;
         String plain = com.start.util.MessageUtil.extractPlainText(msg.path("message")).trim();
-        // 只有消息就是关键词本身，才直接触发（不走 AI）
+        // 精确匹配关键词
         for (String t : TRIGGERS) if (plain.equals(t)) return true;
         return false;
     }
@@ -46,6 +54,31 @@ public class RankHandler implements MessageHandler {
         String raw = msg.path("raw_message").asText().trim();
         long groupId = msg.path("group_id").asLong();
         String gid = String.valueOf(groupId);
+
+        // 详情查询 "幸运排行-3"
+        var detailMatcher = DETAIL_PATTERN.matcher(raw);
+        if (detailMatcher.find()) {
+            String type = detailMatcher.group(1);
+            int rank = Integer.parseInt(detailMatcher.group(2));
+            if (rank < 1 || rank > 15) { bot.sendGroupReply(groupId, "排名序号1-15哦"); return; }
+            String userId = getUserIdByRank(gid, type, rank);
+            if (userId == null) { bot.sendGroupReply(groupId, "没有第" + rank + "名数据~"); return; }
+            String card = buildProfileCard(bot, groupId, gid, type, rank);
+            bot.sendGroupReply(groupId, card);
+            // 异步发送头像（避免 WebSocket 线程死锁）
+            final long fGroupId = groupId;
+            final long fUid;
+            try { fUid = Long.parseLong(userId); } catch (NumberFormatException e) { return; }
+            new Thread(() -> {
+                try {
+                    String url = getAvatarUrl(bot, fGroupId, fUid);
+                    if (url != null && !url.isEmpty()) {
+                        bot.sendGroupReply(fGroupId, "[CQ:image,file=" + url + "]");
+                    }
+                } catch (Exception ignored) {}
+            }, "avatar-fetcher").start();
+            return;
+        }
 
         String feature = "群排行";
         if (raw.contains("发言") || raw.contains("水群")) {
@@ -124,6 +157,137 @@ public class RankHandler implements MessageHandler {
     }
 
     private record ProfessionScore(String name, String rarity, int tier, int power) {}
+
+    /** 获取群成员头像 URL */
+    private static String getMemberAvatar(Main bot, long groupId, String userId) {
+        try {
+            return bot.getOneBotWsService().getGroupMemberDisplayNames(groupId).toString();
+        } catch (Exception e) { return ""; }
+    }
+
+    /** 获取排名第N名的用户ID */
+    private static String getUserIdByRank(String gid, String type, int rank) {
+        if (type.contains("幸运") || type.contains("好运")) {
+            var list = getLuckList(gid);
+            return rank <= list.size() ? list.get(rank - 1).getKey() : null;
+        } else if (type.contains("发言")) {
+            var list = GroupMessageStatsRepository.getMessageRank(gid, "total");
+            return rank <= list.size() ? list.get(rank - 1).getKey() : null;
+        } else if (type.contains("好感")) {
+            var list = getAffinityList(gid);
+            return rank <= list.size() ? list.get(rank - 1).getKey() : null;
+        } else if (type.contains("职业") || type.contains("战力")) {
+            var list = getProfessionList(gid);
+            return rank <= list.size() ? list.get(rank - 1).getKey() : null;
+        }
+        return null;
+    }
+
+    /** 构建个人详情卡片 */
+    private String buildProfileCard(Main bot, long groupId, String gid, String type, int rank) {
+        String userId = getUserIdByRank(gid, type, rank);
+        if (userId == null) return "没有第" + rank + "名数据~";
+
+        String name = displayName(userId, gid);
+        int luck = 0;
+        String profession = "";
+        int power = 0;
+        int affinity = 0;
+        int msgCount = 0;
+        String location = "";
+
+        try {
+            long uid = Long.parseLong(userId);
+            luck = LuckUtil.getDailyLuck(uid);
+            var spell = LuckUtil.getDailySpell(uid);
+            var p = DailyProfessionHandler.drawForUser(uid);
+            power = DailyProfessionHandler.getCombatPower(uid);
+            profession = "【" + p.rarity + "】" + p.name + "(" + p.tier + "阶)";
+            // 好感度
+            try (java.sql.Connection c = DatabaseConfig.getConnection();
+                 java.sql.PreparedStatement ps = c.prepareStatement(
+                         "SELECT affinity_score FROM user_affinity WHERE user_id=? AND group_id=? LIMIT 1")) {
+                ps.setString(1, userId); ps.setString(2, gid);
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) affinity = rs.getInt("affinity_score");
+                }
+            } catch (Exception ignored) {}
+            // 发言数
+            try (java.sql.Connection c = DatabaseConfig.getConnection();
+                 java.sql.PreparedStatement ps = c.prepareStatement(
+                         "SELECT SUM(message_count) FROM group_message_stats WHERE user_id=? AND group_id=?")) {
+                ps.setString(1, userId); ps.setString(2, gid);
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) msgCount = rs.getInt(1);
+                }
+            } catch (Exception ignored) {}
+            // 所在地
+            var loc = new UserAliasRepository().getLocation(userId, gid);
+            if (loc.isPresent()) location = loc.get();
+            return name + " | " + userId + "\n" +
+                   "🍀 幸运:" + luck + " " + spell.doSpell() + "\n" +
+                   "⚔️ " + profession + " 战力:" + power + "\n" +
+                   "💕 好感:" + affinity + " | 💬 " + msgCount + "条" +
+                   (!location.isEmpty() ? "\n📍 " + location : "");
+        } catch (NumberFormatException e) { return "QQ号解析错误"; }
+    }
+
+    private static String getAvatarUrl(Main bot, long groupId, long userId) {
+        try {
+            var future = bot.getOneBotWsService().getGroupMemberAvatarUrlAsync(groupId, userId);
+            return future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) { return ""; }
+    }
+
+    private static List<Map.Entry<String, Integer>> getLuckList(String groupId) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        try (java.sql.Connection c = DatabaseConfig.getConnection();
+             java.sql.PreparedStatement ps = c.prepareStatement(
+                     "SELECT DISTINCT user_id FROM group_message_stats WHERE group_id=?")) {
+            ps.setString(1, groupId);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String uid = rs.getString("user_id");
+                    try { map.put(uid, LuckUtil.getDailyLuck(Long.parseLong(uid))); }
+                    catch (NumberFormatException ignored) {}
+                }
+            }
+        } catch (Exception e) {}
+        return map.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).toList();
+    }
+
+    private static List<Map.Entry<String, Integer>> getAffinityList(String groupId) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        try (java.sql.Connection c = DatabaseConfig.getConnection();
+             java.sql.PreparedStatement ps = c.prepareStatement(
+                     "SELECT user_id, affinity_score FROM user_affinity WHERE group_id=? ORDER BY affinity_score DESC")) {
+            ps.setString(1, groupId);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) map.put(rs.getString("user_id"), rs.getInt("affinity_score"));
+            }
+        } catch (Exception e) {}
+        return map.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).toList();
+    }
+
+    private static List<Map.Entry<String, Integer>> getProfessionList(String groupId) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        try (java.sql.Connection c = DatabaseConfig.getConnection();
+             java.sql.PreparedStatement ps = c.prepareStatement(
+                     "SELECT DISTINCT user_id FROM group_message_stats WHERE group_id=?")) {
+            ps.setString(1, groupId);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String uid = rs.getString("user_id");
+                    try { map.put(uid, getCombatPower(Long.parseLong(uid))); }
+                    catch (NumberFormatException ignored) {}
+                }
+            }
+        } catch (Exception e) {}
+        return map.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed()).toList();
+    }
 
     private String buildHelp() {
         return "📊 可用排行榜：\n" +

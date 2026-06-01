@@ -22,6 +22,7 @@ public class BotConfig {
     private static boolean privateWhitelistEnabled = false;
     private static Set<Long> ALLOWED_GROUPS = Collections.emptySet();
     private static Set<Long> ALLOWED_PRIVATE_USERS = Collections.emptySet();
+    private static Set<Long> PRIVATE_BLACKLIST = Collections.emptySet();
     private static String oneBotHttpBaseUrl;
     private static String oneBotAccessToken;
     private static String wsBaseUrl;
@@ -38,6 +39,13 @@ public class BotConfig {
     private static String agentModel;
     private static int agentTimeoutMs;
     private static int agentMaxRetries;
+
+    private static String ttsBaseUrl;
+    private static String ttsDefaultVoice;
+    private static String ttsAudioFormat;
+    private static String ttsOutputDir;
+    private static int ttsTimeoutMs;
+    private static int ttsMaxRetries;
 
     private static int httpConnectTimeoutMs;
 
@@ -68,6 +76,7 @@ public class BotConfig {
             privateWhitelistEnabled = Boolean.parseBoolean(enabledStr);
             ALLOWED_GROUPS = parseLongSet(resolve(props.getProperty("allowed.groups", "")));
             ALLOWED_PRIVATE_USERS = parseLongSet(resolve(props.getProperty("allowed.private.users", "")));
+            PRIVATE_BLACKLIST = parseLongSet(resolve(props.getProperty("private.blacklist", "1285989735")));
 
             baiLianApiKey = resolve(props.getProperty("bailian.api-key", resolve(props.getProperty("dashscope.api-key", ""))).trim());
             baiLianBaseUrl = resolve(props.getProperty("bailian.base-url", "https://api.meai.cloud/v1/chat/completions").trim());
@@ -81,6 +90,13 @@ public class BotConfig {
             agentTimeoutMs = parseInt(resolve(props.getProperty("agent.timeout-ms", "90000")), 90000);
             agentMaxRetries = parseInt(resolve(props.getProperty("agent.max-retries", "2")), 2);
 
+            ttsBaseUrl = resolve(props.getProperty("tts.base-url", "http://127.0.0.1:8765").trim());
+            ttsDefaultVoice = resolve(props.getProperty("tts.default-voice", "tangguoxiong").trim());
+            ttsAudioFormat = resolve(props.getProperty("tts.audio-format", "mp3").trim());
+            ttsTimeoutMs = parseInt(resolve(props.getProperty("tts.timeout-ms", "30000")), 30000);
+            ttsOutputDir = resolve(props.getProperty("tts.output-dir", "/opt/qq-bot/tts/output").trim());
+            ttsMaxRetries = parseInt(resolve(props.getProperty("tts.max-retries", "2")), 2);
+
             httpConnectTimeoutMs = parseInt(resolve(props.getProperty("http.connect-timeout-ms", "10000")), 10000);
 
             logger.info("🤖 机器人 QQ: {}, 名字: {}", botQq, botName);
@@ -93,6 +109,7 @@ public class BotConfig {
             } else {
                 logger.info("✅ 所有私聊消息将被允许");
             }
+            logger.info("🔊 TTS 服务: {} (voice={}, format={})", ttsBaseUrl, ttsDefaultVoice, ttsAudioFormat);
         } catch (Exception e) {
             logger.error("❌ 加载配置失败", e);
             throw new RuntimeException("配置加载失败，请检查 application.properties", e);
@@ -155,6 +172,9 @@ public class BotConfig {
     public static Set<Long> getAllowedPrivateUsers() {
         return ALLOWED_PRIVATE_USERS;
     }
+    public static Set<Long> getPrivateBlacklist() {
+        return PRIVATE_BLACKLIST;
+    }
 
     public static String getOneBotHttpBaseUrl() {
         return oneBotHttpBaseUrl;
@@ -210,6 +230,30 @@ public class BotConfig {
 
     public static int getAgentMaxRetries() {
         return agentMaxRetries;
+    }
+
+    public static String getTtsBaseUrl() {
+        return ttsBaseUrl;
+    }
+
+    public static String getTtsDefaultVoice() {
+        return ttsDefaultVoice;
+    }
+
+    public static String getTtsAudioFormat() {
+        return ttsAudioFormat;
+    }
+
+    public static String getTtsOutputDir() {
+        return ttsOutputDir;
+    }
+
+    public static int getTtsTimeoutMs() {
+        return ttsTimeoutMs;
+    }
+
+    public static int getTtsMaxRetries() {
+        return ttsMaxRetries;
     }
 
     public static int getHttpConnectTimeoutMs() {

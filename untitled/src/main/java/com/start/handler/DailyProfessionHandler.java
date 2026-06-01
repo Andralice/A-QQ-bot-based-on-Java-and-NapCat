@@ -102,15 +102,14 @@ public class DailyProfessionHandler implements MessageHandler {
         ProfessionEntry selected;
         int combatPower;
 
-        if (record != null && today.equals(record.date)) {
-            // 今天已经抽过，返回旧职业
+        if (record != null && today.equals(record.date) && record.date.equals(java.time.LocalDate.now().toString())) {
             selected = record.professionEntry;
             combatPower = record.combatPower;
         } else {
-            // 首次抽取：根据稀有度权重抽取
-            selected = drawByWeightedRandom();
-            combatPower = calculateCombatPower(selected);
-            userProfessionCache.put(cacheKey, new ProfessionRecord(today, selected, combatPower));
+            // 使用确定性算法，和排行榜一致
+            selected = drawForUser(userId);
+            combatPower = getCombatPower(userId);
+            userProfessionCache.put(cacheKey, new ProfessionRecord(java.time.LocalDate.now().toString(), selected, combatPower));
         }
 
         // 准备数据并渲染

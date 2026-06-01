@@ -31,3 +31,7 @@ String fullPrompt = basePrompt + context + "\n用户说：" + userMessage;
 
 # 指定分支
 ./Note/git-push.sh "message" master
+
+
+
+./deploy.sh

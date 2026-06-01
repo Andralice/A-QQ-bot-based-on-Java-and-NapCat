@@ -71,6 +71,9 @@ public class Main extends WebSocketClient {
     /** 百炼大模型调用服务（阿里云 DashScope）。 */
     private final BaiLianService baiLianService;
 
+    /** TTS 语音合成服务。 */
+    private final TtsService ttsService;
+
     /** 用户亲密度存储仓库，用于个性化推荐与互动。 */
     private final UserAffinityRepository userAffinityRepo = new UserAffinityRepository();
 
@@ -131,14 +134,20 @@ public class Main extends WebSocketClient {
         // 初始化知识库服务（需数据源）
         this.keywordKnowledgeService = new KeywordKnowledgeService(DatabaseConfig.getDataSource());
 
+        // 初始化 TTS 语音服务
+        this.ttsService = new TtsService();
+
         // 初始化大模型服务
-        this.baiLianService = new BaiLianService(this.keywordKnowledgeService, this.userAffinityRepo);
+        this.baiLianService = new BaiLianService(this.keywordKnowledgeService, this.userAffinityRepo, this.ttsService);
         this.baiLianService.setMoodService(this.moodService);
         this.baiLianService.setBotInstance(this);
         this.agentService = new AgentService(this.baiLianService, this.keywordKnowledgeService, this.userAffinityRepo);
 
+        // 初始化每群串行执行器（私聊4线程，排队30秒超时）
+        GroupSerialExecutor groupExecutor = new GroupSerialExecutor(4, 30_000);
+
         // 初始化事件处理器注册中心
-        this.handlerRegistry = new HandlerRegistry(this.agentService, this.baiLianService);
+        this.handlerRegistry = new HandlerRegistry(this.agentService, this.baiLianService, groupExecutor);
 
         // 设置 DashScope API Key（来自配置文件，不使用环境变量）
         if (BotConfig.getBaiLianApiKey() != null && !BotConfig.getBaiLianApiKey().isBlank()) {
@@ -274,7 +283,11 @@ public class Main extends WebSocketClient {
                     logger.debug("🚫 忽略非白名单群消息 | group_id={}", groupId);
                 }
             } else if ("private".equals(messageType)) {
-                if (!BotConfig.isPrivateWhitelistEnabled()) {
+                // 私聊黑名单检查
+                if (BotConfig.getPrivateBlacklist().contains(userId)) {
+                    isAllowed = false;
+                    logger.debug("🚫 黑名单用户私聊被拒 | user_id={}", userId);
+                } else if (!BotConfig.isPrivateWhitelistEnabled()) {
                     isAllowed = true;
                     logger.debug("💬 接受私聊（白名单未启用）| user_id={}", userId);
                 } else {
@@ -479,6 +492,9 @@ public class Main extends WebSocketClient {
             if (this.baiLianService != null) {
                 this.baiLianService.recordGroupContext(
                         String.valueOf(groupId), "candybear", "糖果熊", reply, "bot_reply");
+                this.baiLianService.getBotMemory().record(
+                        String.valueOf(groupId), BotMemoryService.EntryType.SAID, null,
+                        reply.length() > 100 ? reply.substring(0, 100) + "..." : reply);
             }
         } catch (Exception e) {
             logger.error("❌ 发送群聊回复失败", e);

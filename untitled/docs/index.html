@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>糖果熊 — QQ 群 AI 助手</title>
+<style>
+:root {
+  --bg-deep: #0d0b1e;
+  --card: rgba(20,16,40,0.55);
+  --border: rgba(255,255,255,0.06);
+  --text: #d8d0f0;
+  --muted: #8a80b0;
+  --accent: #c44dff;
+  --pink: #ff6b9d;
+  --radius: 18px;
+  --gap: 24px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: var(--bg-deep);
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% -20%, rgba(120,40,200,0.15), transparent),
+    radial-gradient(ellipse 60% 80% at 80% 40%, rgba(40,80,200,0.1), transparent),
+    radial-gradient(ellipse 50% 70% at 20% 80%, rgba(200,60,120,0.08), transparent);
+  min-height: 100vh;
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+}
+#stars { position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:0; }
+
+.container { max-width:1080px; margin:0 auto; padding:0 32px; position:relative; z-index:1; }
+
+/* Hero */
+.hero { text-align:center; padding:120px 20px 90px; position:relative; z-index:1; }
+.hero-icon { font-size:5rem; margin-bottom:8px; filter:drop-shadow(0 0 40px rgba(255,107,157,0.4)); animation:float 3s ease-in-out infinite; }
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+.hero h1 {
+  font-size:4.2rem; font-weight:900; letter-spacing:-1px;
+  background: linear-gradient(135deg, #ff6b9d 0%, #c44dff 25%, #6ea8fe 50%, #40e0d0 75%, #ff6b9d 100%);
+  background-size:300% 100%; -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+  animation:rainbow 5s ease-in-out infinite;
+  filter:drop-shadow(0 0 40px rgba(196,77,255,0.5));
+  margin-bottom: 16px;
+}
+@keyframes rainbow { 0%,100%{background-position:0% 50%} 50%{background-position:100% 50%} }
+.hero p { font-size:1.15rem; color:var(--muted); max-width:540px; margin:0 auto 28px; letter-spacing:.3px; }
+.hero .tags { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
+.tag {
+  padding:7px 20px; border-radius:24px; font-size:.88rem; font-weight:500;
+  background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
+  letter-spacing:.5px; backdrop-filter:blur(4px); transition:all .3s;
+}
+.tag:hover { border-color:rgba(196,77,255,0.4); background:rgba(196,77,255,0.08); }
+
+/* Sections */
+.section { padding:30px 0 80px; }
+.section-head { text-align:center; margin-bottom:48px; }
+.section-head h2 { font-size:2.2rem; font-weight:800; color:#e4dcf8; letter-spacing:-.5px; margin-bottom:8px; }
+.section-head .line { width:48px; height:3px; background:linear-gradient(90deg,var(--pink),var(--accent)); border-radius:3px; margin:0 auto; }
+.section-head p { color:var(--muted); font-size:.95rem; margin-top:14px; }
+
+/* Feature Grid */
+.grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--gap); }
+@media(max-width:900px) { .grid-3 { grid-template-columns:1fr 1fr; } }
+@media(max-width:600px) { .grid-3 { grid-template-columns:1fr; } }
+
+.card {
+  background:var(--card); backdrop-filter:blur(16px);
+  border:1px solid var(--border); border-radius:var(--radius);
+  padding:32px 28px; transition:all .35s cubic-bezier(.4,0,.2,1);
+  position:relative; overflow:hidden;
+}
+.card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.1),transparent);
+  opacity:0; transition:opacity .35s;
+}
+.card:hover { transform:translateY(-6px); border-color:rgba(196,77,255,0.25); box-shadow:0 12px 40px rgba(80,20,160,0.15); }
+.card:hover::before { opacity:1; }
+.card .icon { font-size:2.2rem; margin-bottom:14px; display:block; }
+.card h3 { font-size:1.1rem; font-weight:700; color:#d0c8f0; margin-bottom:8px; }
+.card p { color:var(--muted); font-size:.92rem; line-height:1.7; }
+
+/* Table */
+.table-wrap { overflow-x:auto; border-radius:var(--radius); border:1px solid var(--border); background:var(--card); backdrop-filter:blur(16px); }
+table { width:100%; border-collapse:collapse; }
+th,td { padding:15px 22px; text-align:left; }
+th { font-size:.8rem; font-weight:700; letter-spacing:1px; color:#b098e0; text-transform:uppercase; border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(0,0,0,0.15); }
+td { font-size:.92rem; color:#c0b8d8; border-bottom:1px solid rgba(255,255,255,0.04); }
+tr:last-child td { border-bottom:none; }
+td code { background:rgba(196,77,255,0.12); padding:4px 12px; border-radius:8px; font-size:.88rem; color:#d0c0f8; border:1px solid rgba(196,77,255,0.15); }
+
+/* Tech pills */
+.pills { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; }
+.pill {
+  padding:10px 22px; border-radius:24px; font-size:.9rem; font-weight:500;
+  background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07);
+  color:#c0b0e8; letter-spacing:.4px; backdrop-filter:blur(4px);
+  transition:all .3s;
+}
+.pill:hover { border-color:rgba(196,77,255,0.3); color:#e0d0f8; }
+
+/* Deploy */
+.deploy { margin-top:60px; padding:40px; background:var(--card); backdrop-filter:blur(16px); border:1px solid var(--border); border-radius:var(--radius); text-align:center; }
+.deploy h3 { font-size:1.3rem; color:#d0c8f0; margin-bottom:20px; }
+.deploy code { display:inline-block; background:rgba(0,0,0,0.25); padding:8px 20px; border-radius:10px; font-size:.9rem; margin:4px 6px; color:#c0b8e0; border:1px solid rgba(255,255,255,0.05); }
+.deploy p { color:var(--muted); font-size:.9rem; margin-top:16px; }
+.deploy a { color:#c4a0ff; text-decoration:none; }
+
+.footer { text-align:center; padding:50px 20px; color:#5a5080; font-size:.82rem; letter-spacing:.5px; }
+.footer span { color:#8a78c0; }
+</style>
+</head>
+<body>
+<canvas id="stars"></canvas>
+
+<header class="hero">
+  <div class="hero-icon">🍬</div>
+  <h1>糖果熊</h1>
+  <p>基于 LLM + NapCat 的智能 QQ 群机器人<br>会聊天 · 能游戏 · 记别称 · 查天气 · 排行 · 语音</p>
+  <div class="tags">
+    <span class="tag">✨ AI 驱动</span><span class="tag">📝 开源</span><span class="tag">🐧 Linux</span><span class="tag">☕ Java</span>
+  </div>
+</header>
+
+<div class="container">
+
+<!-- Features -->
+<section class="section">
+  <div class="section-head"><h2>核心能力</h2><div class="line"></div><p>不只是聊天机器人，更是群里的全能小管家</p></div>
+  <div class="grid-3">
+    <div class="card"><span class="icon">💬</span><h3>智能对话</h3><p>大语言模型驱动，文艺少女风格。上下文记忆、用户画像、好感度系统。</p></div>
+    <div class="card"><span class="icon">🎮</span><h3>群内游戏</h3><p>谁是卧底、猜数字、成语接龙。AI 主持、私聊发词、投票淘汰、代码级状态跟踪。</p></div>
+    <div class="card"><span class="icon">📊</span><h3>排行榜</h3><p>发言 / 今日 / 本周 · 幸运 · 好感 · 职业战力 · 群 CP。15 人 TOP 榜。</p></div>
+    <div class="card"><span class="icon">🔮</span><h3>运势 & 职业</h3><p>每日幸运值 + 宜忌魔咒。天命职业（传说→普通）+ 战力值，跨天自动刷新。</p></div>
+    <div class="card"><span class="icon">📝</span><h3>别称管理</h3><p>主观 / 客观 / 机器人别称，同群唯一。@ 某人一句话记住。</p></div>
+    <div class="card"><span class="icon">🌤</span><h3>天气查询</h3><p>Open-Meteo 全球天气。温度湿度风速、高低温、降雨概率。记忆所在地。</p></div>
+    <div class="card"><span class="icon">⏰</span><h3>定时提醒</h3><p>AI 识别时间表达，群 @ 或私聊提醒。"30 分钟后提醒我抢票"。</p></div>
+    <div class="card"><span class="icon">🎤</span><h3>AI 语音</h3><p>群里直接发语音消息。"说句话" 就能听到糖果熊的声音。</p></div>
+    <div class="card"><span class="icon">✨</span><h3>更多细节</h3><p>戳一戳 · 情绪系统 · 冷场主动插话 · 回复上下文感知 · 排行个人卡片。</p></div>
+  </div>
+</section>
+
+<!-- Commands -->
+<section class="section">
+  <div class="section-head"><h2>使用方式</h2><div class="line"></div><p>精确关键词快速触发，自然语言走 AI 理解</p></div>
+  <div class="table-wrap">
+    <table>
+    <tr><th>功能</th><th>直接触发</th><th>AI 对话</th></tr>
+    <tr><td>幸运值</td><td><code>幸运值</code> <code>运势</code> <code>魔咒</code></td><td>"查下我的运势"</td></tr>
+    <tr><td>抽取职业</td><td><code>抽职业</code> <code>今日职业</code></td><td>"我今天是什么职业"</td></tr>
+    <tr><td>发言排行</td><td><code>发言排行</code> <code>今日发言</code></td><td>"谁最能水"</td></tr>
+    <tr><td>幸运排行</td><td><code>幸运排行</code></td><td>"谁的运气最好"</td></tr>
+    <tr><td>好感排行</td><td><code>好感排行</code></td><td>"你最喜欢谁"</td></tr>
+    <tr><td>职业排行</td><td><code>职业排行</code></td><td>"谁的战力最高"</td></tr>
+    <tr><td>个人卡片</td><td><code>幸运排行-3</code></td><td>"第三名是谁"</td></tr>
+    <tr><td>群 CP</td><td><code>群CP</code></td><td>"谁和谁最配"</td></tr>
+    <tr><td>谁是卧底</td><td>—</td><td>"@糖果熊 谁是卧底"</td></tr>
+    <tr><td>猜数字</td><td>—</td><td>"来玩猜数字"</td></tr>
+    <tr><td>记别称</td><td>—</td><td>"他叫小明"</td></tr>
+    <tr><td>查天气</td><td>—</td><td>"今天天气怎么样"</td></tr>
+    <tr><td>定时提醒</td><td>—</td><td>"5分钟后提醒我"</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- Tech -->
+<section class="section">
+  <div class="section-head"><h2>技术栈</h2><div class="line"></div></div>
+  <div class="pills">
+    <span class="pill">Java 17</span><span class="pill">Maven</span><span class="pill">WebSocket</span><span class="pill">NapCat</span>
+    <span class="pill">Open-Meteo</span><span class="pill">GLM-5.1</span><span class="pill">MySQL 8</span><span class="pill">HikariCP</span>
+    <span class="pill">Jackson</span><span class="pill">SLF4J</span><span class="pill">HanLP</span>
+  </div>
+</section>
+
+<!-- Deploy -->
+<section class="section" style="padding-bottom:40px">
+  <div class="section-head"><h2>部署</h2><div class="line"></div></div>
+  <div class="deploy">
+    <h3>快速开始</h3>
+    <code>mvn clean package -DskipTests</code>
+    <code>java -Xms256m -Xmx768m -jar untitled-1.0-SNAPSHOT.jar</code>
+    <p>敏感信息通过环境变量注入，配置文件使用 <code>${ENV_VAR}</code> 占位符</p>
+    <p style="margin-top:12px"><a href="https://github.com/Andralice/A-QQ-bot-based-on-Java-and-NapCat" target="_blank">GitHub →</a></p>
+  </div>
+</section>
+
+</div>
+
+<footer class="footer"><span>糖果熊</span> &copy; 2025–2026</footer>
+
+<script>
+const canvas=document.getElementById('stars'),ctx=canvas.getContext('2d');
+let stars=[],w=0,h=0;
+function rs(){w=canvas.width=window.innerWidth;h=canvas.height=window.innerHeight}
+rs();window.addEventListener('resize',rs);
+for(let i=0;i<150;i++)stars.push({x:Math.random()*w,y:Math.random()*h,r:Math.random()*1.8+.3,t:Math.random()*Math.PI*2,s:Math.random()*.025+.008,a:Math.random()*.5+.5});
+(function draw(){
+  ctx.clearRect(0,0,w,h);
+  for(const s of stars){s.t+=s.s;const a=s.a+Math.sin(s.t)*.35;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fillStyle=`rgba(210,200,245,${Math.max(0,a)})`;ctx.fill();ctx.beginPath();ctx.arc(s.x,s.y,s.r*2.2,0,Math.PI*2);ctx.fillStyle=`rgba(150,130,230,${Math.max(0,a*.18)})`;ctx.fill()}
+  if(Math.random()<.002){const x=Math.random()*w*.4,y=Math.random()*h*.25;ctx.strokeStyle='rgba(255,255,255,.45)';ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+140,y+45);ctx.stroke()}
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

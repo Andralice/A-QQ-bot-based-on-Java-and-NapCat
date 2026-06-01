@@ -6,6 +6,7 @@ import com.start.repository.EggGroupDataCenter;
 import com.start.repository.UserAffinityRepository;
 import com.start.service.AgentService;
 import com.start.service.BaiLianService;
+import com.start.service.GroupSerialExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,7 +24,7 @@ public class HandlerRegistry {
     private final TravelingMerchantHandler merchantHandler = new TravelingMerchantHandler();
     private final AgentService agentService;
 
-    public HandlerRegistry(AgentService agentService, BaiLianService baiLianService) {
+    public HandlerRegistry(AgentService agentService, BaiLianService baiLianService, GroupSerialExecutor groupExecutor) {
         this.agentService = agentService;
 
         handlers.add(new HelloHandler());
@@ -35,9 +36,9 @@ public class HandlerRegistry {
         handlers.add(new DailyCpHandler());
         handlers.add(new RankHandler());
         handlers.add(new EggGroupSearchHandler(dataCenter));
-        handlers.add(new AgentHandler(agentService));
+        handlers.add(new AgentHandler(agentService, groupExecutor));
         handlers.add(merchantHandler);
-        handlers.add(new AIHandler(baiLianService));
+        handlers.add(new AIHandler(baiLianService, groupExecutor));
     }
 
     /**

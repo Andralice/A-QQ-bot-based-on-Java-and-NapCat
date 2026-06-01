@@ -32,7 +32,8 @@ public class SendPrivateTool implements Tool {
                 "properties", Map.of(
                         "user_id", Map.of("type", "string", "description", "接收私聊的用户 QQ"),
                         "message", Map.of("type", "string", "description", "私聊内容"),
-                        "group_id", Map.of("type", "string", "description", "来源群号，非好友私聊必须填")
+                        "group_id", Map.of("type", "string", "description", "来源群号"),
+                        "requester_id", Map.of("type", "string", "description", "发起这个请求的用户 QQ（谁让你发的）")
                 ),
                 "required", Arrays.asList("user_id", "message")
         );
@@ -43,6 +44,18 @@ public class SendPrivateTool implements Tool {
         String userId = (String) args.get("user_id");
         String message = (String) args.get("message");
         String groupId = (String) args.get("group_id");
+        String requesterId = (String) args.get("requester_id");
+
+        // 黑名单检查：黑名单用户不能指挥糖果熊私聊别人
+        if (requesterId != null && !requesterId.isEmpty()) {
+            try {
+                long rid = Long.parseLong(requesterId);
+                if (com.start.config.BotConfig.getPrivateBlacklist().contains(rid)) {
+                    return "私聊功能不可用：你已被限制使用此功能";
+                }
+            } catch (NumberFormatException ignored) {}
+        }
+
         if (userId == null || message == null) return "缺少 user_id 或 message";
         try {
             long gid = 0;

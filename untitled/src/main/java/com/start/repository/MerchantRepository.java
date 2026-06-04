@@ -144,6 +144,13 @@ public class MerchantRepository extends BaseRepository {
         return result.isSuccess() ? result.getData() : List.of();
     }
 
+    public List<Subscription> getEnabledSubscriptionsForUser(long userId) {
+        var result = executeQuery(
+            "SELECT id, group_id, user_id, keywords, match_all, notify_type, enabled FROM merchant_subscription WHERE user_id = ? AND enabled = 1",
+            this::mapSubscription, userId);
+        return result.isSuccess() ? result.getData() : List.of();
+    }
+
     public List<Subscription> getAllEnabledSubscriptions() {
         var result = executeQuery(
             "SELECT id, group_id, user_id, keywords, match_all, notify_type, enabled FROM merchant_subscription WHERE enabled = 1",

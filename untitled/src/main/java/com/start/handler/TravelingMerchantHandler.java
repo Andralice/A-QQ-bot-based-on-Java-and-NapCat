@@ -105,41 +105,57 @@ public class TravelingMerchantHandler implements MessageHandler {
     // === 订阅管理 ===
 
     private void handleSubscribe(long groupId, long userId, String text) {
-        if (groupId == 0) {
-            bot.sendPrivateReply(userId, "远行商人订阅暂不支持私聊，请在群内使用。");
-            return;
-        }
         String args = text.substring("订阅远行商人".length()).trim();
         boolean matchAll = args.isEmpty() || args.equals("全部");
         String keywords = matchAll ? "" : args;
-        repo.upsertSubscription(groupId, userId, keywords, matchAll, "at");
-        String msg = matchAll ? "✅ 已订阅远行商人全部商品提醒！每轮刷新时若有货会 @ 你。"
-                : "✅ 已订阅「" + keywords + "」提醒！当远行商人刷出匹配商品时会 @ 你。";
-        bot.sendGroupReply(groupId, "[CQ:at,qq=" + userId + "] " + msg);
+        boolean isPrivate = groupId == 0;
+        String notifyType = isPrivate ? "pm" : "at";
+        repo.upsertSubscription(groupId, userId, keywords, matchAll, notifyType);
+
+        String desc = matchAll ? "全部商品" : "「" + keywords + "」";
+        String method = isPrivate ? "私聊通知你" : "在群里 @ 你";
+        String more = isPrivate ? "" : "\n💡 想私聊通知？发「订阅远行商人」给我（私聊）即可。";
+        String msg = "✅ 已订阅远行商人" + desc + "提醒！每轮刷新时" + method + "。" + more;
+
+        if (isPrivate) {
+            bot.sendPrivateReply(userId, msg);
+        } else {
+            bot.sendGroupReply(groupId, "[CQ:at,qq=" + userId + "] " + msg);
+        }
     }
 
     private void handleUnsubscribe(long groupId, long userId) {
-        if (groupId == 0) return;
         repo.deleteSubscription(groupId, userId);
-        bot.sendGroupReply(groupId, "[CQ:at,qq=" + userId + "] ✅ 已取消远行商人订阅。");
+        String msg = "✅ 已取消远行商人订阅。";
+        if (groupId == 0) {
+            bot.sendPrivateReply(userId, msg);
+        } else {
+            bot.sendGroupReply(groupId, "[CQ:at,qq=" + userId + "] " + msg);
+        }
     }
 
     private void handleViewSubscriptions(long groupId, long userId) {
-        if (groupId == 0) return;
-        List<Subscription> subs = repo.getEnabledSubscriptions(groupId);
+        List<Subscription> subs;
+        if (groupId > 0) {
+            subs = repo.getEnabledSubscriptions(groupId);
+        } else {
+            subs = repo.getEnabledSubscriptionsForUser(userId);
+        }
         if (subs.isEmpty()) {
-            bot.sendGroupReply(groupId, "📋 当前群暂无远行商人订阅。\n发送「订阅远行商人 国王球 棱镜球」即可订阅。");
+            String tip = "📋 暂无远行商人订阅。\n发送「订阅远行商人 国王球 棱镜球」即可订阅。";
+            sendReply(groupId, userId, tip);
             return;
         }
-        StringBuilder sb = new StringBuilder("📋 当前群远行商人订阅：\n");
+        StringBuilder sb = new StringBuilder("📋 远行商人订阅：\n");
         for (Subscription s : subs) {
             sb.append("· ");
-            if (s.matchAll) sb.append("全部商品");
-            else sb.append(s.keywords);
-            sb.append(" —— QQ:").append(s.userId);
+            if (s.matchAll) sb.append("全部商品"); else sb.append(s.keywords);
+            sb.append(" — ");
+            sb.append("pm".equals(s.notifyType) ? "私聊" : "@");
+            if (s.groupId > 0) sb.append("(群").append(s.groupId).append(")");
             sb.append("\n");
         }
-        bot.sendGroupReply(groupId, sb.toString().trim());
+        sendReply(groupId, userId, sb.toString().trim());
     }
 
     // === 定时检测 ===
@@ -214,7 +230,7 @@ public class TravelingMerchantHandler implements MessageHandler {
         }
 
         for (Subscription sub : allSubs) {
-            if (!sub.enabled || sub.groupId == 0) continue;
+            if (!sub.enabled) continue;
             List<String> matched;
             if (sub.matchAll) {
                 if (data.products.isEmpty()) continue;
@@ -239,19 +255,18 @@ public class TravelingMerchantHandler implements MessageHandler {
         sb.append("🔔 远行商人刷新提醒\n");
         sb.append("📍 第").append(data.roundInfo.current).append("/").append(data.roundInfo.total).append("轮\n");
         sb.append("📦 当前商品：").append(String.join("、", allNames)).append("\n");
-
         if (!sub.matchAll) {
             sb.append("🎯 你关注的：").append(String.join("、", matched)).append("\n");
         }
         if (!highMatches.isEmpty() && !sub.matchAll) {
             sb.append("💎 高价值物资：").append(String.join("、", highMatches)).append("\n");
         }
-        sb.append("━━━━━━━━━━\n");
-        sb.append("[CQ:at,qq=").append(sub.userId).append("]");
 
         if ("pm".equals(sub.notifyType)) {
-            bot.sendPrivateReply(sub.userId, sub.groupId, sb.toString());
+            bot.sendPrivateReply(sub.userId, sub.groupId, sb.toString().trim());
         } else {
+            sb.append("━━━━━━━━━━\n");
+            sb.append("[CQ:at,qq=").append(sub.userId).append("]");
             bot.sendGroupReply(sub.groupId, sb.toString());
         }
     }

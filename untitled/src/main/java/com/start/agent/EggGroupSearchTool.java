@@ -216,8 +216,8 @@ public class EggGroupSearchTool implements Tool {
         if (sizeObj == null || weightObj == null)
             return "❌ 请提供 size（身高，米）和 weight（体重，千克）";
 
-        double size = ((Number) sizeObj).doubleValue();
-        double weight = ((Number) weightObj).doubleValue();
+        double size = Double.parseDouble(String.valueOf(sizeObj));
+        double weight = Double.parseDouble(String.valueOf(weightObj));
 
         if (size <= 0 || size > 100 || weight <= 0 || weight > 10000)
             return "❌ 数值不合理，请输入有效的身高（米）和体重（千克）";

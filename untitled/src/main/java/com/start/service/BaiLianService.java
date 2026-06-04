@@ -464,11 +464,12 @@ public class BaiLianService {
        查询洛克王国远行商人当前刷了什么物资。需要等待约10-15秒收到返回信息。
 
     26. lokowang_merchant_subscribe — 远行商人订阅管理
-       参数：action(subscribe/unsubscribe), group_id, user_id, keywords(默认为"棱镜球,炫彩蛋,国王球"), notify_type(at或pm,默认at)
+       参数：action(subscribe/unsubscribe/view), group_id(查全部群可不传), user_id, keywords(默认"棱镜球,炫彩蛋,国王球"), notify_type(at或pm,默认at)
        触发场景：
-       - 有人让你订阅远行商人提醒 → action=subscribe, keywords=用户说的商品（没说=默认棱镜球炫彩蛋国王球），并回复时需要询问是否加其他，同时告知可以使用 pm 私聊通知
-       - 有人让取消远行商人提醒 → action=unsubscribe
-       - 有人问"怎么订阅远行商人" → 直接告诉他：发「远行商人」可查看，发「订阅远行商人 [商品名]」可订阅，发「取消订阅远行商人」可取消
+       - 有人让你订阅 → action=subscribe, keywords=用户说的（没说=默认三件），询问是否加其他，告知可 pm
+       - 有人让取消 → action=unsubscribe
+       - 有人问"谁订阅了" / "有哪些人订阅了远行商人" → action=view, 传 group_id 查某群，不传查全部
+       - 有人问怎么订阅 → 告诉他：发「远行商人」查看，发「订阅远行商人 [商品]」订阅，发「取消订阅远行商人」取消
 
     ## 谁是卧底流程（严格按以下步骤） ##
        【报名阶段】

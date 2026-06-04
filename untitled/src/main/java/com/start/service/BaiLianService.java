@@ -23,13 +23,14 @@ import com.start.agent.UserAffinityTool;
 import com.start.agent.WebSearchTool;
 import com.start.agent.EggGroupSearchTool;
 import com.start.agent.SanjiaoTool;
+import com.start.agent.MerchantSubscribeTool;
 import com.start.agent.TravelingMerchantTool;
 import com.start.agent.KnowledgeBaseTool;
+import com.start.repository.MerchantRepository;
 import com.start.agent.LearnKnowledgeTool;
 import com.start.agent.UserAliasTool;
 import com.start.agent.VoiceTool;
 import com.start.agent.WeatherTool;
-import com.start.handler.TravelingMerchantHandler;
 import com.start.repository.EggGroupDataCenter;
 import com.start.config.BotConfig;
 import com.start.config.DatabaseConfig;
@@ -139,10 +140,12 @@ public class BaiLianService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final TtsService ttsService;
-    private TravelingMerchantHandler merchantHandler;
     private final EggGroupDataCenter eggGroupDataCenter = new EggGroupDataCenter();
+    private MerchantApiService merchantApiService;
+    private MerchantRepository merchantRepo;
 
-    public void setMerchantHandler(TravelingMerchantHandler h) { this.merchantHandler = h; }
+    public void setMerchantApiService(MerchantApiService s) { this.merchantApiService = s; }
+    public void setMerchantRepo(MerchantRepository r) { this.merchantRepo = r; }
 
     public BaiLianService(KeywordKnowledgeService knowledgeService, UserAffinityRepository userAffinityRepo, TtsService ttsService) {
         this.knowledgeService = Objects.requireNonNull(knowledgeService, "knowledgeService cannot be null");
@@ -460,6 +463,13 @@ public class BaiLianService {
     25. lokowang_merchant_query — 远行商人查询（无参数）
        查询洛克王国远行商人当前刷了什么物资。需要等待约10-15秒收到返回信息。
 
+    26. lokowang_merchant_subscribe — 远行商人订阅管理
+       参数：action(subscribe/unsubscribe), group_id, user_id, keywords(默认为"棱镜球,炫彩蛋,国王球"), notify_type(at或pm,默认at)
+       触发场景：
+       - 有人让你订阅远行商人提醒 → action=subscribe, keywords=用户说的商品（没说=默认棱镜球炫彩蛋国王球），并回复时需要询问是否加其他，同时告知可以使用 pm 私聊通知
+       - 有人让取消远行商人提醒 → action=unsubscribe
+       - 有人问"怎么订阅远行商人" → 直接告诉他：发「远行商人」可查看，发「订阅远行商人 [商品名]」可订阅，发「取消订阅远行商人」可取消
+
     ## 谁是卧底流程（严格按以下步骤） ##
        【报名阶段】
        - 游戏开始后5秒内的\"1\"\"我\"\"玩\"才算报名，超时或游戏开始后的新报名一律忽略
@@ -611,7 +621,8 @@ public class BaiLianService {
                     new WebSearchTool(),
                     new SanjiaoTool(),
                     new EggGroupSearchTool(eggGroupDataCenter),
-                    new TravelingMerchantTool(merchantHandler, botInstance)
+                    new TravelingMerchantTool(merchantApiService != null ? merchantApiService : new MerchantApiService()),
+                    new MerchantSubscribeTool(merchantRepo != null ? merchantRepo : new MerchantRepository())
             );
 
             String requestBody = objectMapper.writeValueAsString(requestBodyObj);

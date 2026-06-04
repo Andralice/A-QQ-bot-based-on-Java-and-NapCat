@@ -156,10 +156,7 @@ public class Main extends WebSocketClient {
         GroupSerialExecutor groupExecutor = new GroupSerialExecutor(4, 30_000);
 
         // 初始化事件处理器注册中心
-        this.handlerRegistry = new HandlerRegistry(this.agentService, this.baiLianService, groupExecutor);
-
-        // 将远行商人处理器注入到 BaiLianService，供 TravelingMerchantTool 使用
-        this.baiLianService.setMerchantHandler(this.handlerRegistry.getMerchantHandler());
+        this.handlerRegistry = new HandlerRegistry(this.agentService, this.baiLianService, groupExecutor, this);
 
         // 设置 DashScope API Key（来自配置文件，不使用环境变量）
         if (BotConfig.getBaiLianApiKey() != null && !BotConfig.getBaiLianApiKey().isBlank()) {
@@ -375,12 +372,6 @@ public class Main extends WebSocketClient {
                     ReminderService.getInstance().onPrivateMessageReceived(userId);
 
                     // ... 其他逻辑（如 dispatch）...
-                }
-                
-                // ✅ 优先处理远行商人响应
-                if (this.handlerRegistry.handleMerchantResponse(event, this)) {
-                    logger.debug("✅ 已处理远行商人响应，跳过常规分发");
-                    return;
                 }
                 
                 // 执行防刷检测（仅群聊）

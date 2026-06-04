@@ -1,23 +1,23 @@
 package com.start.agent;
 
-import com.start.Main;
-import com.start.handler.TravelingMerchantHandler;
+import com.start.service.MerchantApiService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.util.Map;
 
 /**
- * 洛克王国远行商人查询工具，供 AI 调用。
- * 通过跨群查询获取远行商人当前售卖的商品信息。
+ * 洛克王国远行商人查询工具，供 AI Agent 调用。
+ * 通过熵增团队的 WeGame 代理 API 直接获取远行商人当前商品。
  */
 public class TravelingMerchantTool implements Tool {
 
-    private final TravelingMerchantHandler merchantHandler;
-    private final Main bot;
+    private static final Logger logger = LoggerFactory.getLogger(TravelingMerchantTool.class);
 
-    public TravelingMerchantTool(TravelingMerchantHandler merchantHandler, Main bot) {
-        this.merchantHandler = merchantHandler;
-        this.bot = bot;
+    private final MerchantApiService apiService;
+
+    public TravelingMerchantTool(MerchantApiService apiService) {
+        this.apiService = apiService;
     }
 
     @Override public String getName() { return "lokowang_merchant_query"; }
@@ -34,11 +34,11 @@ public class TravelingMerchantTool implements Tool {
     @Override
     public String execute(Map<String, Object> args) {
         try {
-            String result = merchantHandler.queryMerchantSync(bot)
-                    .get(30, TimeUnit.SECONDS);
-            return result;
+            MerchantApiService.MerchantData data = apiService.fetchMerchantInfo(false);
+            return apiService.formatForReply(data);
         } catch (Exception e) {
-            return "⏰ 远行商人查询超时，请稍后重试（直接发「远行商人」也可以查）。";
+            logger.error("远行商人查询失败", e);
+            return "⏰ 远行商人查询失败，请稍后重试。";
         }
     }
 }

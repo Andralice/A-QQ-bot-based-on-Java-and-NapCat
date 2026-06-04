@@ -47,6 +47,13 @@ public class BotConfig {
     private static int ttsTimeoutMs;
     private static int ttsMaxRetries;
 
+    private static String merchantApiBaseUrl;
+    private static String merchantApiKey;
+    private static boolean merchantNotifyEnabled;
+    private static Set<Long> merchantNotifyGroups;
+    private static Set<Long> merchantNotifyQqs;
+    private static Set<String> merchantHighValueItems;
+
     private static int httpConnectTimeoutMs;
     private static String webSearchUrl;
     private static String webSearchBackend;
@@ -99,6 +106,16 @@ public class BotConfig {
             ttsOutputDir = resolve(props.getProperty("tts.output-dir", "/opt/qq-bot/tts/output").trim());
             ttsMaxRetries = parseInt(resolve(props.getProperty("tts.max-retries", "2")), 2);
 
+            merchantApiBaseUrl = resolve(props.getProperty("merchant.api.base-url", "https://wegame.shallow.ink"));
+            merchantApiKey = resolve(props.getProperty("merchant.api.key", ""));
+            merchantNotifyEnabled = Boolean.parseBoolean(resolve(props.getProperty("merchant.notify.enabled", "true")));
+            merchantNotifyGroups = parseLongSet(resolve(props.getProperty("merchant.notify.groups", "")));
+            if (merchantNotifyGroups.isEmpty()) {
+                merchantNotifyGroups = ALLOWED_GROUPS;
+            }
+            merchantNotifyQqs = parseLongSet(resolve(props.getProperty("merchant.notify.qqs", "3524398813,3360232949")));
+            merchantHighValueItems = parseStringSet(resolve(props.getProperty("merchant.high-value-items", "国王球,炫彩蛋,首领血脉,棱镜球")));
+
             httpConnectTimeoutMs = parseInt(resolve(props.getProperty("http.connect-timeout-ms", "10000")), 10000);
             webSearchUrl = resolve(props.getProperty("web.search.url", "https://html.duckduckgo.com/html/"));
             webSearchBackend = resolve(props.getProperty("web.search.backend", "bing"));
@@ -148,13 +165,32 @@ public class BotConfig {
 
     private static Set<Long> parseLongSet(String value) {
         if (value == null || value.trim().isEmpty()) {
-            return Collections.emptySet(); // 空配置 → 返回空集合
+            return Collections.emptySet();
         }
-        return Arrays.stream(value.split(","))     // 按逗号分割
-                .map(String::trim)            // 去掉空格（如 " 123 " → "123"）
-                .filter(s -> !s.isEmpty())    // 过滤掉空字符串
-                .map(Long::parseLong)         // 把 "123" 转成 Long 类型 123L
-                .collect(Collectors.toSet()); // 收集成 Set<Long>
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .map(Long::parseLong)
+                .collect(Collectors.toSet());
+    }
+
+    private static long parseLongSafe(String value) {
+        if (value == null || value.trim().isEmpty()) return 0;
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private static Set<String> parseStringSet(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return Collections.emptySet();
+        }
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toSet());
     }
 
     public static long getBotQq() {
@@ -271,6 +307,18 @@ public class BotConfig {
     public static String getWebSearchBackend() {
         return webSearchBackend;
     }
+
+    public static String getMerchantApiBaseUrl() { return merchantApiBaseUrl; }
+
+    public static String getMerchantApiKey() { return merchantApiKey; }
+
+    public static boolean isMerchantNotifyEnabled() { return merchantNotifyEnabled; }
+
+    public static Set<Long> getMerchantNotifyGroups() { return merchantNotifyGroups; }
+
+    public static Set<Long> getMerchantNotifyQqs() { return merchantNotifyQqs; }
+
+    public static Set<String> getMerchantHighValueItems() { return merchantHighValueItems; }
 
     public static String getAt(long userId) {
         return "[CQ:at,qq=" + userId + "]";

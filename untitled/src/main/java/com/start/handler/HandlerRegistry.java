@@ -3,10 +3,11 @@ package com.start.handler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.start.Main;
 import com.start.repository.EggGroupDataCenter;
-import com.start.repository.UserAffinityRepository;
+import com.start.repository.MerchantRepository;
 import com.start.service.AgentService;
 import com.start.service.BaiLianService;
 import com.start.service.GroupSerialExecutor;
+import com.start.service.MerchantApiService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,11 +22,22 @@ public class HandlerRegistry {
     private static final Logger logger = LoggerFactory.getLogger(HandlerRegistry.class);
 
     private final EggGroupDataCenter dataCenter = new EggGroupDataCenter();
-    private final TravelingMerchantHandler merchantHandler = new TravelingMerchantHandler();
+    private final TravelingMerchantHandler merchantHandler;
+    private final MerchantApiService merchantApiService;
     private final AgentService agentService;
 
-    public HandlerRegistry(AgentService agentService, BaiLianService baiLianService, GroupSerialExecutor groupExecutor) {
+    public HandlerRegistry(AgentService agentService, BaiLianService baiLianService, GroupSerialExecutor groupExecutor, Main bot) {
         this.agentService = agentService;
+
+        // 远行商人：数据库 + API
+        MerchantRepository merchantRepo = new MerchantRepository();
+        merchantRepo.initTables();
+        this.merchantApiService = new MerchantApiService(merchantRepo);
+        this.merchantHandler = new TravelingMerchantHandler(merchantApiService, merchantRepo, bot);
+
+        // 注入到 BaiLianService 供 Agent Tool 使用
+        baiLianService.setMerchantApiService(merchantApiService);
+        baiLianService.setMerchantRepo(merchantRepo);
 
         handlers.add(new HelloHandler());
         handlers.add(new LuckHandler());
@@ -39,20 +51,6 @@ public class HandlerRegistry {
         handlers.add(new AgentHandler(agentService, groupExecutor));
         handlers.add(merchantHandler);
         handlers.add(new AIHandler(baiLianService, groupExecutor));
-    }
-
-    /**
-     * 处理来自目标群的响应消息（优先处理）
-     * @param message 收到的消息
-     * @param bot 机器人实例
-     * @return 是否已处理
-     */
-    public boolean handleMerchantResponse(JsonNode message, Main bot) {
-        return merchantHandler.handleResponse(message);
-    }
-
-    public TravelingMerchantHandler getMerchantHandler() {
-        return merchantHandler;
     }
 
     public void dispatch(JsonNode message, Main bot) {

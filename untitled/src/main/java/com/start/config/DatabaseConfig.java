@@ -213,6 +213,87 @@ public class DatabaseConfig {
                 "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
                 "UNIQUE KEY uk_group_id (group_id)" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+
+            // 糖果熊自身记忆表
+            "CREATE TABLE IF NOT EXISTS bot_memories (" +
+                "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                "group_id VARCHAR(50) NOT NULL," +
+                "entry_type VARCHAR(20) NOT NULL," +
+                "target VARCHAR(100)," +
+                "detail TEXT," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "INDEX idx_bm_group (group_id)," +
+                "INDEX idx_bm_type (entry_type)," +
+                "INDEX idx_bm_created (created_at DESC)" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+
+            // 糖果熊日程表
+            "CREATE TABLE IF NOT EXISTS candy_bear_schedule (" +
+                "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                "schedule_date DATE NOT NULL," +
+                "day_of_week VARCHAR(10)," +
+                "time_slot VARCHAR(20)," +
+                "start_time TIME NOT NULL," +
+                "end_time TIME NOT NULL," +
+                "activity VARCHAR(200)," +
+                "location VARCHAR(100)," +
+                "mood VARCHAR(50)," +
+                "is_school_day BOOLEAN DEFAULT FALSE," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "INDEX idx_cbs_date (schedule_date)," +
+                "INDEX idx_cbs_time (schedule_date, start_time)" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+
+            // 糖果熊人生引擎：story_arc（2~3周章节）
+            "CREATE TABLE IF NOT EXISTS candy_bear_story_arcs (" +
+                "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                "arc_name VARCHAR(100) NOT NULL," +
+                "start_date DATE NOT NULL," +
+                "end_date DATE NOT NULL," +
+                "summary TEXT," +
+                "major_events TEXT," +
+                "mood_trend VARCHAR(50)," +
+                "active BOOLEAN DEFAULT TRUE," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+
+            // 糖果熊人生引擎：weekly_diary（每周日生成）
+            "CREATE TABLE IF NOT EXISTS candy_bear_weekly_diaries (" +
+                "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                "week_start DATE NOT NULL," +
+                "week_end DATE NOT NULL," +
+                "summary TEXT," +
+                "major_events TEXT," +
+                "emotion VARCHAR(50)," +
+                "next_week_plan TEXT," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "UNIQUE KEY uk_week_start (week_start)" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+
+            // 糖果熊人生引擎：daily_journal（每天凌晨生成昨日日记）
+            "CREATE TABLE IF NOT EXISTS candy_bear_daily_journals (" +
+                "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                "journal_date DATE NOT NULL UNIQUE," +
+                "important_events TEXT," +
+                "emotion VARCHAR(50)," +
+                "summary TEXT," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+
+            // 糖果熊人生状态（单行表，随剧情演进更新）
+            "CREATE TABLE IF NOT EXISTS candy_bear_life_state (" +
+                "id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                "school VARCHAR(100) DEFAULT '人大附中国际班'," +
+                "grade VARCHAR(20) DEFAULT '高二'," +
+                "friends VARCHAR(500) DEFAULT '小雨,阿乐'," +
+                "hobbies VARCHAR(500) DEFAULT '三角洲行动,洛克王国,崩铁,追番,画画,看小说'," +
+                "recent_problem TEXT," +
+                "current_goal TEXT," +
+                "location VARCHAR(100) DEFAULT '北京海淀'," +
+                "health_note TEXT DEFAULT '轻微心脏问题，不需每天上学'," +
+                "updated_at DATE NOT NULL," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         };
 
         for (String sql : migrations) {

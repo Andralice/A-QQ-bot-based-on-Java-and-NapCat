@@ -40,10 +40,12 @@ public class LongTermMemoryRepository {
     /** 按用户+群检索记忆，关键词模糊匹配，排除已触发的定时事件 */
     public List<LongTermMemory> search(String userId, String groupId, String keyword, int limit) throws SQLException {
         StringBuilder sql = new StringBuilder(
-                "SELECT * FROM long_term_memories WHERE user_id = ? AND (group_id = ? OR group_id IS NULL) AND triggered = FALSE ");
+                "SELECT * FROM long_term_memories WHERE user_id = ? AND group_id ");
+        boolean hasGroup = groupId != null && !groupId.isBlank();
+        sql.append(hasGroup ? "= ? AND triggered = FALSE " : "IS NULL AND triggered = FALSE ");
         List<String> params = new ArrayList<>();
         params.add(userId);
-        params.add(groupId);
+        if (hasGroup) params.add(groupId);
 
         if (keyword != null && !keyword.isBlank()) {
             sql.append("AND (content LIKE ? OR keywords LIKE ?) ");
@@ -52,6 +54,39 @@ public class LongTermMemoryRepository {
         }
 
         sql.append("ORDER BY importance DESC, recall_count DESC, created_at DESC LIMIT ?");
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) {
+                ps.setString(i + 1, params.get(i));
+            }
+            ps.setInt(params.size() + 1, limit);
+
+            ResultSet rs = ps.executeQuery();
+            List<LongTermMemory> results = new ArrayList<>();
+            while (rs.next()) {
+                results.add(mapRow(rs));
+            }
+            return results;
+        }
+    }
+
+    /** 按群组检索记忆（不限用户），关键词模糊匹配 */
+    public List<LongTermMemory> searchByGroup(String groupId, String keyword, int limit) throws SQLException {
+        StringBuilder sql = new StringBuilder(
+                "SELECT * FROM long_term_memories WHERE group_id ");
+        boolean hasGroup = groupId != null && !groupId.isBlank();
+        sql.append(hasGroup ? "= ? AND triggered = FALSE " : "IS NULL AND triggered = FALSE ");
+        List<String> params = new ArrayList<>();
+        if (hasGroup) params.add(groupId);
+
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append("AND (content LIKE ? OR keywords LIKE ?) ");
+            params.add("%" + keyword + "%");
+            params.add("%" + keyword + "%");
+        }
+
+        sql.append("ORDER BY importance DESC, created_at DESC LIMIT ?");
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql.toString())) {

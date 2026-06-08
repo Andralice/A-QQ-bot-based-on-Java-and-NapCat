@@ -86,8 +86,11 @@ public class MerchantSubscribeTool implements Tool {
         boolean isPrivate = groupId == 0;
 
         String keywords = String.valueOf(args.getOrDefault("keywords", ""));
+        if (keywords.isEmpty()) {
+            keywords = "棱镜球,炫彩蛋,国王球";
+        }
         String notifyType = isPrivate ? "pm" : String.valueOf(args.getOrDefault("notify_type", "at"));
-        boolean matchAll = keywords.isEmpty() || "全部".equals(keywords.trim());
+        boolean matchAll = "全部".equals(keywords.trim());
 
         repo.upsertSubscription(groupId, userId, keywords, matchAll, notifyType);
         String desc = matchAll ? "全部商品" : keywords;

@@ -27,7 +27,7 @@
 
 - **自然语言对话** — 双模型架构，日常聊天与复杂任务分离，支持多轮上下文与追问识别
 - **主动社交参与** — 基于话题兴趣与群活跃度的主动插话机制，冷场检测与话题引导
-- **Agent 工具调用** — 23 个可调用工具覆盖天气、搜索、提醒、排行榜、知识库、记忆等场景
+- **Agent 工具调用** — 24 个可调用工具覆盖天气、搜索、提醒、排行榜、知识库、记忆等场景
 - **用户画像与好感度** — 定时分析群聊记录生成兴趣标签及动态好感度
 - **群互动生态** — 每日 CP 配对、职业/命格抽卡、幸运值、排行榜等轻量社交玩法
 - **游戏辅助** — 洛克王国宠物数据库、远行商人查询、三角洲行动截图
@@ -57,7 +57,7 @@
 │                   HandlerRegistry (责任链)                  │
 │                                                             │
 │  Hello → Luck → Joke → Reminder → Sanjiao → DailyProfession │
-│  → DailyCp → Rank → EggGroupSearch → Agent → Merchant → AI  │
+│  → DailyCp → Rank → EggGroupSearch → Agent → Merchant → AI │
 │                                                             │
 │  命中即停止 (first-match wins)                              │
 └──────────────────────────┬──────────────────────────────────┘
@@ -65,9 +65,9 @@
           ┌────────────────┼────────────────┐
           ▼                ▼                ▼
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│ BaiLianService│  │ AgentService │  │ 23 × Tool   │
+│ BaiLianService│  │ AgentService │  │ 24 × Tool   │
 │ (日常对话)    │  │ (智能助手)   │  │ (工具调用)   │
-│ MiniMax-M2.5 │  │ Qwen-Max     │  │              │
+│ glm-5.1      │  │ gemini-3-flash│  │              │
 └──────┬───────┘  └──────┬───────┘  └──────────────┘
        │                 │
        └────────┬────────┘
@@ -107,7 +107,7 @@
 | 8 | **RankHandler** | `发言排行` `幸运排行` 等 30+ 词 | 多维排行榜 (发言/幸运/好感/职业/CP) |
 | 9 | **EggGroupSearchHandler** | `#查蛋` `#查进化` `#预测蛋` | 洛克王国宠物数据库查询 |
 | 10 | **AgentHandler** | `请帮我...` | AI 决策 + 工具调用 (天气/好感度) |
-| 11 | **TravelingMerchantHandler** | `远行商人` | 跨群查询洛克王国远行商人商品 |
+| 11 | **TravelingMerchantHandler** | `远行商人` / `订阅远行商人` / `取消订阅远行商人` | 远行商人商品查询、订阅/取消提醒、查看订阅，支持私聊与群聊 |
 | 12 | **AIHandler** | 所有群消息 (兜底) | AI 对话、主动插话、追问识别 |
 
 **AIHandler 三种响应模式：**
@@ -124,7 +124,7 @@
 
 ### 3.2 AI 工具集
 
-AI 可通过 `<tool_call>` XML 块动态调用以下 23 个工具：
+AI 可通过 `<tool_call>` XML 块动态调用以下 24 个工具：
 
 #### 信息查询类
 
@@ -168,6 +168,7 @@ AI 可通过 `<tool_call>` XML 块动态调用以下 23 个工具：
 | **SanjiaoTool** | `delta_force_query` | 三角洲行动游戏截图 |
 | **EggGroupSearchTool** | `lokowang_pet_query` | 洛克王国宠物数据库查询 |
 | **TravelingMerchantTool** | `lokowang_merchant_query` | 远行商人商品查询 |
+| **MerchantSubscribeTool** | `lokowang_merchant_subscribe` | 远行商人订阅管理 (订阅/取消/查看) |
 
 ---
 
@@ -175,12 +176,13 @@ AI 可通过 `<tool_call>` XML 块动态调用以下 23 个工具：
 
 | 服务 | 职责 |
 |------|------|
-| **BaiLianService** | 双模型 AI 核心：MiniMax-M2.5 负责日常聊天，Qwen-Max 负责 Agent/工具调用。包含多模态上下文管理、RAG 知识库增强、主动插话决策、频率控制、人设注入 |
-| **AgentService** | 智能助手决策引擎：接收"请帮我"请求，交由 AI 决策工具调用链路 |
+| **BaiLianService** | 双模型 AI 核心：glm-5.1 负责日常聊天，gemini-3-flash 负责 Agent/工具调用。包含多模态上下文管理、RAG 知识库增强、主动插话决策、频率控制、人设注入 |
+| **AgentService** | 智能助手决策引擎：接收"请帮我"请求，交由 AI 决策工具调用链路（24 个工具注册于 BaiLianService） |
 | **BotMoodService** | 分群情绪系统：每群独立维护 0–100 心情值 (低落/平静/开心/兴奋)，持久化至 `group_mood` 表。冷场检测 + 自动话题投放 |
 | **UserPortraitService** | 用户画像引擎：定时批处理分析聊天记录，生成兴趣标签，动态调整好感度 (–5 ~ +5/次)，持久化至 `user_profiles` / `user_affinity` |
 | **ReminderService** | 提醒调度引擎：`ScheduledThreadPoolExecutor` (3 线程) 驱动，支持周期/单次/每日/延迟四种模式。用户回复私聊自动停止 |
 | **TtsService** | 语音合成：调用 `text-to-speech.cn` API，支持重试 (3 次)、Token 缓存、MP3 输出 |
+| **MerchantApiService** | 远行商人 API 服务：定时拉取商品数据，缓存至数据库，支持高价值物资筛选与通知推送 |
 | **WebScreenshotService** | 网页截图：调用外部 Python 脚本异步截图，自动清理临时文件 |
 | **SpamDetector** | 防刷检测：群聊消息频率监控与打断 |
 | **GroupSerialExecutor** | 群聊串行执行器：同群内 AI 调用与游戏逻辑串行化，避免竞态 |
@@ -212,7 +214,7 @@ AI 可通过 `<tool_call>` XML 块动态调用以下 23 个工具：
 | **通信** | Java-WebSocket | 1.5.3 |
 | **协议** | OneBot v11 (NapCat) | — |
 | **数据库** | MySQL (HikariCP 连接池) | — |
-| **AI 模型** | MiniMax-M2.5 / Qwen-Max (OpenAI 兼容 API) | — |
+| **AI 模型** | glm-5.1 / gemini-3-flash (OpenAI 兼容 API) | — |
 | **NLP** | HanLP (Portable) | 1.8.4 |
 | **JSON** | Jackson (FasterXML) | — |
 | **HTTP** | `java.net.http.HttpClient` (Java 11+) | — |
@@ -265,15 +267,15 @@ bot.qq=123456789
 # 允许的群 (逗号分隔)
 bot.allowed-groups=123456,789012
 
-# AI 对话模型 (MiniMax)
+# AI 对话模型
 bailian.api-key=${BAILIAN_API_KEY}
 bailian.base-url=https://api.scnet.cn/v1
-bailian.model=minimax-m2.5
+bailian.model=glm-5.1
 
-# AI Agent 模型 (Qwen)
+# AI Agent 模型
 agent.api-key=${AGENT_API_KEY}
-agent.base-url=https://dashscope.aliyuncs.com/compatible-mode/v1
-agent.model=qwen-max
+agent.base-url=https://api.scnet.cn/v1
+agent.model=gemini-3-flash
 
 # 数据库
 datasource.url=jdbc:mysql://localhost:3306/qq_bot
@@ -379,6 +381,8 @@ java -Xms256m -Xmx768m -jar /opt/qq-bot/untitled-1.0-SNAPSHOT.jar
 | `group_message_stats` | 群消息统计 (发言数) |
 | `long_term_memory` | 长期记忆与定时事件 |
 | `keyword_knowledge` | 关键词知识库 |
+| `merchant_cache` | 远行商人商品缓存 |
+| `merchant_subscription` | 远行商人订阅记录 |
 | `users` | 用户昵称缓存 |
 | `messages` | 原始消息归档 |
 

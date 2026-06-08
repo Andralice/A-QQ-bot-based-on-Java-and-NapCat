@@ -25,6 +25,7 @@ public class AgentHandler implements MessageHandler {
     @Override
     public boolean match(JsonNode message) {
         String raw = message.path("raw_message").asText().toLowerCase();
+        if (raw.contains("远行商人")) return false;
         return raw.contains("请帮我");
     }
 

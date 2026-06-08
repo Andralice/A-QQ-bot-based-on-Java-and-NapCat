@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
+import java.util.Set;
 
 /**
  * 远行商人卡片渲染器 — 童真风格，柔和色彩。
@@ -47,7 +48,9 @@ public class MerchantCardRenderer {
     private static final Color C_LAVENDER_BG = new Color(0xF0E8F8);
     private static final Color C_SKY     = new Color(0x5BA0D0); // 天空蓝
     private static final Color C_SKY_BG  = new Color(0xE0EFF8);
-    private static final Color C_ICON_BG = new Color(0xFFE8D8);
+    private static final Color C_ICON_BG   = new Color(0xFFE8D8);
+    private static final Color C_HIGHLIGHT_BG = new Color(0xFFE8B0); // 高亮行背景（暖金色）
+    private static final Color C_STAR      = new Color(0xF0A500); // 关注星星色
 
     private final Font fTitle, fBody, fSmall, fBadge;
 
@@ -61,17 +64,32 @@ public class MerchantCardRenderer {
     private Font load(String name, float sz) {
         try {
             java.io.InputStream is = getClass().getClassLoader().getResourceAsStream("assets/fonts/" + name);
-            return is == null ? new Font(Font.SANS_SERIF, Font.PLAIN, (int) sz)
-                              : Font.createFont(Font.TRUETYPE_FONT, is).deriveFont(sz);
+            if (is == null) {
+                logger.warn("字体文件不存在: assets/fonts/{}，降级为 SansSerif", name);
+                return new Font(Font.SANS_SERIF, Font.PLAIN, (int) sz);
+            }
+            return Font.createFont(Font.TRUETYPE_FONT, is).deriveFont(sz);
         } catch (Exception e) {
+            logger.warn("字体加载失败: {}，降级为 SansSerif ({})", name, e.toString());
             return new Font(Font.SANS_SERIF, Font.PLAIN, (int) sz);
         }
     }
 
     public String renderToBase64(MerchantData data) {
+        return renderToBase64(data, null, false);
+    }
+
+    /**
+     * @param data            商人数据
+     * @param highlightNames  需要高亮的商品名集合（null 或空 = 不高亮）
+     * @param isSubscription  是否为订阅提醒卡片（标题加「订阅提醒」标记）
+     */
+    public String renderToBase64(MerchantData data, Set<String> highlightNames, boolean isSubscription) {
         try {
             int rows = Math.max(data.products.size(), 1);
-            int H = PAD + 80 + GAP + rows * (ROW_H + GAP) + PAD;
+            // 订阅模式标题稍高
+            int headerH = isSubscription ? 96 : 80;
+            int H = PAD + headerH + GAP + rows * (ROW_H + GAP) + PAD;
             BufferedImage img = new BufferedImage(W, H, BufferedImage.TYPE_INT_ARGB);
             Graphics2D g = img.createGraphics();
             configure(g);
@@ -81,16 +99,17 @@ public class MerchantCardRenderer {
             g.fillRoundRect(0, 0, W, H, 20, 20);
 
             int y = PAD;
-            y = header(g, data, y);
+            y = header(g, data, y, isSubscription);
             y += GAP;
-            productList(g, data, y);
+            productList(g, data, y, highlightNames);
 
             g.dispose();
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ImageIO.write(img, "png", baos);
             return Base64.getEncoder().encodeToString(baos.toByteArray());
         } catch (Exception e) {
-            logger.error("渲染卡片失败", e);
+            logger.error("渲染远行商人卡片失败: {} ({}行商品, isSubscription={})",
+                    e.toString(), data.products.size(), isSubscription, e);
             return null;
         }
     }
@@ -104,6 +123,10 @@ public class MerchantCardRenderer {
     // === Header ===
 
     private int header(Graphics2D g, MerchantData data, int y0) {
+        return header(g, data, y0, false);
+    }
+
+    private int header(Graphics2D g, MerchantData data, int y0, boolean isSubscription) {
         MerchantRoundInfo r = data.roundInfo;
         int x = PAD;
         int w = W - 2 * PAD;
@@ -112,6 +135,18 @@ public class MerchantCardRenderer {
         g.setFont(fTitle);
         g.setColor(TEXT);
         g.drawString("远行商人", x, y0 + 26);
+
+        // 订阅标记
+        if (isSubscription) {
+            String subTag = "🔔 订阅提醒";
+            g.setFont(fSmall);
+            FontMetrics sfm = g.getFontMetrics();
+            int sw = sfm.stringWidth(subTag) + 14;
+            g.setColor(C_PINK_BG);
+            g.fillRoundRect(x + 120, y0 + 8, sw, 22, 11, 11);
+            g.setColor(C_PINK);
+            g.drawString(subTag, x + 127, y0 + 22);
+        }
 
         // 轮次 pill
         String round = "第 " + r.current + "/" + r.total + " 轮";
@@ -154,6 +189,10 @@ public class MerchantCardRenderer {
     // === Products ===
 
     private void productList(Graphics2D g, MerchantData data, int y0) {
+        productList(g, data, y0, null);
+    }
+
+    private void productList(Graphics2D g, MerchantData data, int y0, Set<String> highlightNames) {
         if (data.products.isEmpty()) {
             g.setFont(fBody);
             g.setColor(SUBTEXT);
@@ -163,16 +202,23 @@ public class MerchantCardRenderer {
         int y = y0 + 6;
         for (int i = 0; i < data.products.size(); i++) {
             boolean last = i == data.products.size() - 1;
-            y = productRow(g, data.products.get(i), y, last);
+            String pname = data.products.get(i).name;
+            boolean hl = highlightNames != null && !highlightNames.isEmpty()
+                    && highlightNames.stream().anyMatch(h -> pname.contains(h));
+            y = productRow(g, data.products.get(i), y, last, hl);
         }
     }
 
     private int productRow(Graphics2D g, MerchantProduct p, int y, boolean last) {
+        return productRow(g, p, y, last, false);
+    }
+
+    private int productRow(Graphics2D g, MerchantProduct p, int y, boolean last, boolean highlighted) {
         int x = PAD;
         int w = W - 2 * PAD;
 
-        // 行背景
-        g.setColor(ROW_BG);
+        // 行背景 — 高亮商品用暖金色
+        g.setColor(highlighted ? C_HIGHLIGHT_BG : ROW_BG);
         g.fillRoundRect(x, y, w, ROW_H, 14, 14);
 
         // 图标
@@ -214,6 +260,14 @@ public class MerchantCardRenderer {
         // 右侧标签
         int rx = x + w - 12;
         int ry = y + 16;
+
+        // 高亮标记
+        if (highlighted) {
+            String hlTag = "已关注";
+            rx -= pillW(g, hlTag);
+            pill(g, hlTag, rx, ry, C_LEMON_BG, C_STAR);
+            rx -= 6;
+        }
 
         if (p.buyLimit > 0) {
             String t = "限购 " + p.buyLimit;

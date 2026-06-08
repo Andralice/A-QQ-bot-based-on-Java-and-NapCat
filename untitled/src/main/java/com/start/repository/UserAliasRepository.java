@@ -163,12 +163,13 @@ public class UserAliasRepository extends BaseRepository {
     /** 获取群内所有别称+地点信息 */
     public Map<String, AliasInfo> getGroupAliasInfoMap(String groupId) {
         Map<String, AliasInfo> map = new LinkedHashMap<>();
+        boolean hasGroup = groupId != null && !groupId.isBlank();
+        String sql = "SELECT target_user_id, alias_name, alias_type, usage_count, primary_location, secondary_location " +
+                     "FROM user_aliases WHERE group_id" + (hasGroup ? "=? " : " IS NULL ") +
+                     "ORDER BY FIELD(alias_type,'SUBJECTIVE','OBJECTIVE','BOT_ALIAS'), usage_count DESC";
         try (Connection c = DatabaseConfig.getConnection();
-             PreparedStatement ps = c.prepareStatement(
-                     "SELECT target_user_id, alias_name, alias_type, usage_count, primary_location, secondary_location " +
-                     "FROM user_aliases WHERE group_id=? OR group_id IS NULL " +
-                     "ORDER BY FIELD(alias_type,'SUBJECTIVE','OBJECTIVE','BOT_ALIAS'), usage_count DESC")) {
-            ps.setString(1, groupId);
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            if (hasGroup) ps.setString(1, groupId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String uid = rs.getString("target_user_id");

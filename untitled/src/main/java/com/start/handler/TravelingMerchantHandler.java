@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -46,12 +47,16 @@ public class TravelingMerchantHandler implements MessageHandler {
     private String lastCheckedRoundId = "";
     private int retryCount = 0;
 
+    /** 运行时开关，可通过命令「关闭远行商人」/「开启远行商人」切换，重启后恢复为配置文件值 */
+    private volatile boolean scheduledEnabled;
+
     public TravelingMerchantHandler(MerchantApiService apiService, MerchantRepository repo, Main bot) {
         this.apiService = apiService;
         this.repo = repo;
         this.bot = bot;
         this.highValueItems = BotConfig.getMerchantHighValueItems();
-        logger.info("✅ 远行商人处理器已初始化（缓存模式，高价值物资={}）", highValueItems);
+        this.scheduledEnabled = BotConfig.isMerchantNotifyEnabled();
+        logger.info("✅ 远行商人处理器已初始化（缓存模式，高价值物资={}, 定时通知={}）", highValueItems, scheduledEnabled);
         startScheduledCheck();
     }
 
@@ -63,7 +68,8 @@ public class TravelingMerchantHandler implements MessageHandler {
         if (text == null) return false;
         String t = text.trim();
         return t.equals("远行商人") || t.startsWith("远行商人") || t.startsWith("订阅远行商人")
-                || t.equals("取消订阅远行商人") || t.equals("查看远行商人订阅");
+                || t.equals("取消订阅远行商人") || t.equals("查看远行商人订阅")
+                || t.equals("测试远行商人") || t.equals("开启远行商人") || t.equals("关闭远行商人");
     }
 
     @Override
@@ -80,6 +86,12 @@ public class TravelingMerchantHandler implements MessageHandler {
             handleUnsubscribe(groupId, userId);
         } else if (text.equals("查看远行商人订阅")) {
             handleViewSubscriptions(groupId, userId);
+        } else if (text.equals("测试远行商人")) {
+            handleTestRender(groupId, userId);
+        } else if (text.equals("开启远行商人")) {
+            handleToggleNotify(groupId, userId, true);
+        } else if (text.equals("关闭远行商人")) {
+            handleToggleNotify(groupId, userId, false);
         }
     }
 
@@ -158,6 +170,60 @@ public class TravelingMerchantHandler implements MessageHandler {
         sendReply(groupId, userId, sb.toString().trim());
     }
 
+    // === 测试提醒 ===
+
+    /**
+     * 手动触发一次完整的远行商人定时提醒：拉取数据、通知所有订阅者。
+     * 用于调试定时通知的渲染问题。
+     */
+    private void handleTestRender(long groupId, long userId) {
+        sendReply(groupId, userId, "🔍 正在手动触发远行商人定时提醒…");
+        try {
+            MerchantData data = apiService.fetchMerchantInfo(true);
+            if (data == null || data.products.isEmpty()) {
+                sendReply(groupId, userId, "⚠️ 当前远行商人无商品数据，无法触发提醒。");
+                return;
+            }
+
+            MerchantRoundInfo round = data.roundInfo;
+            if (round != null) {
+                lastCheckedRoundId = round.roundId;
+            }
+
+            List<String> allNames = data.products.stream().map(p -> p.name).toList();
+            List<String> highMatches = apiService.findHighValueMatches(data, highValueItems);
+
+            logger.info("🔧 用户 {} 手动触发远行商人提醒: round={}, 商品数={}, 订阅者将收到通知",
+                    userId, round != null ? round.roundId : "?", data.products.size());
+
+            notifySubscribers(data, allNames, highMatches);
+
+            sendReply(groupId, userId, "✅ 已触发提醒！"
+                    + data.products.size() + "件商品已推送给所有订阅者。\n"
+                    + "💡 如渲染失败，请查看控制台日志。");
+        } catch (Exception e) {
+            logger.error("手动触发远行商人提醒失败", e);
+            sendReply(groupId, userId, "❌ 触发异常: " + e.toString());
+        }
+    }
+
+    // === 开关控制 ===
+
+    /**
+     * 运行时切换定时通知开关。不持久化，重启后恢复为配置文件值。
+     */
+    private void handleToggleNotify(long groupId, long userId, boolean enable) {
+        if (enable == scheduledEnabled) {
+            sendReply(groupId, userId, enable ? "✅ 远行商人定时通知本就处于开启状态。" : "✅ 远行商人定时通知本就处于关闭状态。");
+            return;
+        }
+        scheduledEnabled = enable;
+        logger.info("🔧 远行商人定时通知已被 {} 切换为: {}", userId, enable ? "开启" : "关闭");
+        sendReply(groupId, userId, enable
+                ? "✅ 已开启远行商人定时通知。\n💡 每轮刷新时将自动推送订阅提醒。"
+                : "✅ 已关闭远行商人定时通知。\n💡 发送「开启远行商人」可重新开启。");
+    }
+
     // === 定时检测 ===
 
     private synchronized void startScheduledCheck() {
@@ -192,6 +258,8 @@ public class TravelingMerchantHandler implements MessageHandler {
             }
         }
         if (!isCheckMinute && retryCount == 0) return;
+
+        if (!scheduledEnabled) return;
 
         try {
             MerchantData data = apiService.fetchMerchantInfo(true); // force refresh
@@ -251,23 +319,32 @@ public class TravelingMerchantHandler implements MessageHandler {
 
     private void sendSubscriberNotification(Subscription sub, MerchantData data,
                                             List<String> allNames, List<String> matched, List<String> highMatches) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("🔔 远行商人刷新提醒\n");
-        sb.append("📍 第").append(data.roundInfo.current).append("/").append(data.roundInfo.total).append("轮\n");
-        sb.append("📦 当前商品：").append(String.join("、", allNames)).append("\n");
+        // 构建文字前缀（订阅专属信息）
+        StringBuilder prefix = new StringBuilder();
+        prefix.append("🔔 远行商人刷新提醒\n");
+        prefix.append("📍 第").append(data.roundInfo.current).append("/").append(data.roundInfo.total).append("轮\n");
         if (!sub.matchAll) {
-            sb.append("🎯 你关注的：").append(String.join("、", matched)).append("\n");
+            prefix.append("🎯 你关注的：").append(String.join("、", matched)).append("\n");
         }
         if (!highMatches.isEmpty() && !sub.matchAll) {
-            sb.append("💎 高价值物资：").append(String.join("、", highMatches)).append("\n");
+            prefix.append("💎 高价值物资：").append(String.join("、", highMatches)).append("\n");
+        }
+
+        // 渲染图片（含商品图标，高亮关注商品）
+        Set<String> highlightSet = sub.matchAll ? null : new HashSet<>(matched);
+        String base64 = cardRenderer.renderToBase64(data, highlightSet, true);
+        if (base64 != null) {
+            prefix.append("[CQ:image,file=base64://").append(base64).append("]");
+        } else {
+            // 渲染失败时回落文本
+            prefix.append("📦 当前商品：").append(String.join("、", allNames));
         }
 
         if ("pm".equals(sub.notifyType)) {
-            bot.sendPrivateReply(sub.userId, sub.groupId, sb.toString().trim());
+            bot.sendPrivateReply(sub.userId, sub.groupId, prefix.toString().trim());
         } else {
-            sb.append("━━━━━━━━━━\n");
-            sb.append("[CQ:at,qq=").append(sub.userId).append("]");
-            bot.sendGroupReply(sub.groupId, sb.toString());
+            prefix.append("\n[CQ:at,qq=").append(sub.userId).append("]");
+            bot.sendGroupReply(sub.groupId, prefix.toString());
         }
     }
 

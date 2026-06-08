@@ -199,7 +199,8 @@ public class MessageRepository extends BaseRepository {
     /**
      * 搜索群聊历史消息，支持按关键词、用户、时间范围过滤。
      */
-    public DatabaseResult<List<ChatMessage>> searchMessages(String groupId, String keyword, String userId, int minutes, int limit) {
+    public DatabaseResult<List<ChatMessage>> searchMessages(String groupId, String keyword, String userId,
+                                                            String dateFrom, String dateTo, int limit) {
         return safeExecute(() -> {
             StringBuilder sql = new StringBuilder("SELECT * FROM messages WHERE group_id = ? AND is_robot_reply = FALSE ");
             List<Object> params = new ArrayList<>();
@@ -213,9 +214,13 @@ public class MessageRepository extends BaseRepository {
                 sql.append("AND user_id = ? ");
                 params.add(userId);
             }
-            if (minutes > 0) {
-                sql.append("AND created_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE) ");
-                params.add(minutes);
+            if (dateFrom != null && !dateFrom.isBlank()) {
+                sql.append("AND created_at >= ? ");
+                params.add(normalizeDateFrom(dateFrom));
+            }
+            if (dateTo != null && !dateTo.isBlank()) {
+                sql.append("AND created_at <= ? ");
+                params.add(normalizeDateTo(dateTo));
             }
 
             sql.append("ORDER BY created_at DESC LIMIT ?");
@@ -241,6 +246,18 @@ public class MessageRepository extends BaseRepository {
                 closeResources(conn, pstmt, rs);
             }
         });
+    }
+
+    /** "2026-06-05" → "2026-06-05 00:00:00", "2026-06-05 14:30" → 原样 */
+    private String normalizeDateFrom(String s) {
+        s = s.trim();
+        if (s.matches("\\d{4}-\\d{2}-\\d{2}")) s += " 00:00:00";
+        return s;
+    }
+    private String normalizeDateTo(String s) {
+        s = s.trim();
+        if (s.matches("\\d{4}-\\d{2}-\\d{2}")) s += " 23:59:59";
+        return s;
     }
 
     /**

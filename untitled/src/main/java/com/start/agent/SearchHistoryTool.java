@@ -1,27 +1,32 @@
 package com.start.agent;
 
 import com.start.model.ChatMessage;
+import com.start.model.LongTermMemory;
+import com.start.repository.LongTermMemoryRepository;
 import com.start.repository.MessageRepository;
 
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
- * AI 查询群聊历史记录：按关键词、用户、条数搜索。
+ * AI 查询群聊历史：同时查 long_term_memories（结构化记忆）+ messages（原始记录兜底）。
+ * 支持任意时间范围查询。
  */
 public class SearchHistoryTool implements Tool {
     private final MessageRepository messageRepo;
+    private final LongTermMemoryRepository memoryRepo;
 
-    public SearchHistoryTool() {
+    public SearchHistoryTool(LongTermMemoryRepository memoryRepo) {
         this.messageRepo = new MessageRepository();
+        this.memoryRepo = memoryRepo;
     }
 
     @Override public String getName() { return "search_chat_history"; }
 
     @Override public String getDescription() {
-        return "搜索群聊历史记录（数据库中的真实消息）。" +
-               "当用户问'刚才谁说了XXX''帮我查一下XXX说过什么''最近有没有人提过XXX''搜一下聊天记录'时调用。" +
-               "参数：keyword(搜索关键词), user_id(指定某人QQ), count(返回条数，默认10), minutes(最近N分钟)";
+        return "搜索群聊历史记录（包括AI提炼的记忆和原始消息）。支持任意时间范围。" +
+               "当用户问'刚才谁说了XXX''今天大家聊了什么''昨天XX说过什么''上周有没有人提过XXX'时调用。" +
+               "参数：keyword(搜索关键词), user_id(指定某人QQ), count(返回条数，默认10), date_from(起始日期，如2026-06-05或2026-06-05 14:30), date_to(结束日期，如2026-06-05或2026-06-05 23:59)";
     }
 
     @Override
@@ -32,7 +37,8 @@ public class SearchHistoryTool implements Tool {
                         "keyword", Map.of("type", "string", "description", "搜索关键词"),
                         "user_id", Map.of("type", "string", "description", "指定用户QQ号"),
                         "count", Map.of("type", "string", "description", "返回条数，默认10，最多50"),
-                        "minutes", Map.of("type", "string", "description", "搜索最近N分钟内的消息")
+                        "date_from", Map.of("type", "string", "description", "起始日期时间，如'2026-06-05'（当天00:00起）或'2026-06-05 14:30'。查今天/昨天/某天时必填"),
+                        "date_to", Map.of("type", "string", "description", "结束日期时间，如'2026-06-05'（当天23:59止）或'2026-06-05 18:00'。查今天/昨天/某天时必填")
                 ),
                 "required", Arrays.asList("group_id"));
     }
@@ -45,35 +51,70 @@ public class SearchHistoryTool implements Tool {
         String keyword = (String) args.get("keyword");
         String userId = (String) args.get("user_id");
         int count = Math.min(parseIntSafe((String) args.get("count"), 10), 50);
-        int minutes = parseIntSafe((String) args.get("minutes"), 0);
+        String dateFrom = (String) args.get("date_from");
+        String dateTo = (String) args.get("date_to");
 
-        var result = messageRepo.searchMessages(groupId,
-                blankToNull(keyword),
-                blankToNull(userId),
-                minutes,
-                count);
+        StringBuilder result = new StringBuilder();
 
-        if (!result.isSuccess()) {
-            return "查询聊天记录失败：" + result.getError();
+        // 1. 先查结构化记忆（long_term_memories）
+        try {
+            List<LongTermMemory> memories;
+            if (userId != null && !userId.isBlank()) {
+                memories = memoryRepo.search(userId, groupId, blankToNull(keyword), Math.min(count, 20));
+            } else {
+                memories = memoryRepo.searchByGroup(groupId, blankToNull(keyword), Math.min(count, 20));
+            }
+
+            if (memories != null && !memories.isEmpty()) {
+                DateTimeFormatter fmt = DateTimeFormatter.ofPattern("MM-dd HH:mm");
+                result.append("【结构化记忆】找到 ").append(memories.size()).append(" 条：\n");
+                for (int i = 0; i < memories.size(); i++) {
+                    LongTermMemory m = memories.get(i);
+                    result.append(i + 1).append(". [").append(m.getMemoryType()).append("] ");
+                    result.append(m.getUserId()).append(": ").append(m.getContent());
+                    result.append(" (").append(m.getCreatedAt() != null ? m.getCreatedAt().format(fmt) : "??").append(")\n");
+                }
+                result.append("\n");
+            }
+        } catch (Exception e) {
+            result.append("【结构化记忆】查询失败: ").append(e.getMessage()).append("\n\n");
         }
 
-        List<ChatMessage> messages = result.getData();
+        // 2. 再查原始消息（messages 兜底）
+        var msgResult = messageRepo.searchMessages(groupId,
+                blankToNull(keyword),
+                blankToNull(userId),
+                dateFrom,
+                dateTo,
+                count);
+
+        if (!msgResult.isSuccess()) {
+            result.append("【原始记录】查询失败：").append(msgResult.getError());
+            return result.toString().trim();
+        }
+
+        List<ChatMessage> messages = msgResult.getData();
         if (messages == null || messages.isEmpty()) {
-            StringBuilder sb = new StringBuilder("未找到相关聊天记录。");
-            if (keyword != null && !keyword.isBlank()) sb.append(" 关键词：").append(keyword);
-            if (userId != null && !userId.isBlank()) sb.append(" 用户：").append(userId);
-            return sb.toString();
+            if (result.isEmpty()) {
+                StringBuilder sb = new StringBuilder("未找到相关聊天记录。");
+                if (keyword != null && !keyword.isBlank()) sb.append(" 关键词：").append(keyword);
+                if (userId != null && !userId.isBlank()) sb.append(" 用户：").append(userId);
+                if (dateFrom != null) sb.append(" 时间：").append(dateFrom).append(" ~ ").append(dateTo != null ? dateTo : "现在");
+                return sb.toString();
+            }
+            result.append("【原始记录】无匹配消息");
+            return result.toString().trim();
         }
 
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss");
-        StringBuilder sb = new StringBuilder("找到 ").append(messages.size()).append(" 条聊天记录：\n");
-        // DB 返回按时间倒序，反转成正序方便阅读
+        result.append("【原始记录】找到 ").append(messages.size()).append(" 条：\n");
         for (int i = messages.size() - 1; i >= 0; i--) {
             ChatMessage msg = messages.get(i);
-            sb.append("- [").append(msg.getCreatedAt() != null ? msg.getCreatedAt().format(fmt) : "??");
-            sb.append("] ").append(msg.getUserId()).append(": ").append(msg.getContent()).append("\n");
+            result.append("- [").append(msg.getCreatedAt() != null ? msg.getCreatedAt().format(fmt) : "??");
+            result.append("] ").append(msg.getUserId()).append(": ").append(msg.getContent()).append("\n");
         }
-        return sb.toString();
+
+        return result.toString().trim();
     }
 
     private int parseIntSafe(String s, int def) {

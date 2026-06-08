@@ -162,22 +162,28 @@ public class DailyProfessionHandler implements MessageHandler {
 
     /** 确定性抽取（用户+日期种子），供排行榜使用 */
     public static ProfessionEntry drawForUser(long userId) {
-        String seed = "profession-" + userId + "-" + java.time.LocalDate.now();
-        Random rand = new Random(seed.hashCode());
-        double roll = rand.nextDouble() * 100;
+        String today = java.time.LocalDate.now().toString();
+        int tierSeed = ("profession-" + userId + "-" + today).hashCode();
+        Random tierRand = new Random(tierSeed);
+        double roll = tierRand.nextDouble() * 100;
+
+        // 职业选取用独立种子，断开与 nextDouble() 的 LCG 序列相关性
+        int pickSeed = ("pick-" + userId + "-" + today).hashCode();
+        Random pickRand = new Random(pickSeed);
 
         double cumulative = 0;
-        cumulative += 3;  if (roll < cumulative) return drawByTier(5, rand);
-        cumulative += 10; if (roll < cumulative) return drawByTier(4, rand);
-        cumulative += 27; if (roll < cumulative) return drawByTier(3, rand);
-        cumulative += 60; return drawByTier(rand.nextInt(2) + 1, rand);
+        cumulative += 3;  if (roll < cumulative) return drawByTier(5, pickRand);
+        cumulative += 10; if (roll < cumulative) return drawByTier(4, pickRand);
+        cumulative += 27; if (roll < cumulative) return drawByTier(3, pickRand);
+        cumulative += 60; return drawByTier(tierRand.nextInt(2) + 1, pickRand);
     }
 
     /** 获取用户的今日战力（确定性） */
     public static int getCombatPower(long userId) {
         ProfessionEntry p = drawForUser(userId);
-        String seed = "power-" + userId + "-" + java.time.LocalDate.now();
-        Random rand = new Random(seed.hashCode());
+        String today = java.time.LocalDate.now().toString();
+        long powerSeed = ("power-" + userId + "-" + today).hashCode() & 0xFFFFFFFFL;
+        Random rand = new Random(powerSeed);
         return p.minPower + rand.nextInt(p.maxPower - p.minPower + 1);
     }
 

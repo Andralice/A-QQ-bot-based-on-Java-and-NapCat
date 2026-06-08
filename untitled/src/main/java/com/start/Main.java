@@ -12,6 +12,8 @@ import com.start.repository.GroupMoodRepository;
 import com.start.repository.LongTermMemoryRepository;
 import com.start.repository.MessageRepository;
 import com.start.model.LongTermMemory;
+import com.start.repository.CandyBearLifeRepository;
+import com.start.repository.CandyBearScheduleRepository;
 import com.start.repository.UserAffinityRepository;
 import com.start.service.*;
 import org.java_websocket.client.WebSocketClient;
@@ -175,6 +177,35 @@ public class Main extends WebSocketClient {
         logger.info("🛡️ SpamDetector 初始化完成");
 
         logger.info("🧠 BaiLianService 已绑定 KeywordKnowledgeService");
+
+        // 写入糖果熊背景知识种子数据
+        this.keywordKnowledgeService.seedCandyBearKnowledge();
+
+        // 初始化糖果熊人生引擎（AI 驱动的连续生命线）
+        CandyBearLifeRepository lifeRepo = new CandyBearLifeRepository(DatabaseConfig.getDataSource());
+        CandyBearScheduleRepository scheduleRepo = new CandyBearScheduleRepository(DatabaseConfig.getDataSource());
+        CandyBearLifeEngine lifeEngine = new CandyBearLifeEngine(lifeRepo, scheduleRepo, this.baiLianService);
+        this.baiLianService.setLifeEngine(lifeEngine);
+        lifeEngine.onStartup();
+        logger.info("📅 糖果熊人生引擎已启动（四层架构：章节→周记→日记→工具查询 + LifeState + 日程表）");
+
+        // 每天凌晨 3 点生成昨日日记 + 周日生成周记
+        Thread lifeThread = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    Thread.sleep(millisUntilNext3AM());
+                    lifeEngine.dailyTick();
+                    logger.info("📅 糖果熊人生引擎 tick 完成");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    logger.error("人生引擎 tick 失败", e);
+                }
+            }
+        }, "CandyBearLife-Thread");
+        lifeThread.setDaemon(true);
+        lifeThread.start();
 
         logger.info("🤖 Agent 已启用");
 
@@ -560,6 +591,16 @@ public class Main extends WebSocketClient {
         while (!bot.isClosed()) {
             Thread.sleep(1000);
         }
+    }
+
+    /** 计算到下一个凌晨 3:00 的毫秒数 */
+    private static long millisUntilNext3AM() {
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        java.time.LocalDateTime next = now.withHour(3).withMinute(0).withSecond(0).withNano(0);
+        if (!next.isAfter(now)) {
+            next = next.plusDays(1);
+        }
+        return java.time.Duration.between(now, next).toMillis();
     }
 
 }

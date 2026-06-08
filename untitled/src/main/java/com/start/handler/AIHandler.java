@@ -94,6 +94,7 @@ public class AIHandler implements MessageHandler {
 
         // 明确触发（#ai / !ai / @）
         if (isExplicitTrigger(msg, rawMessage)) {
+            aiService.cancelPendingAwait(gid, String.valueOf(userId));
             handleExplicitAIRequest(bot, msg, userId, groupId, rawMessage, plainText, nickname);
             return;
         }

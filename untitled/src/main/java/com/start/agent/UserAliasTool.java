@@ -13,6 +13,7 @@ import java.util.*;
  * - get_bot_aliases: 查糖果熊自己的别称列表
  */
 public class UserAliasTool implements Tool {
+    private static final String SUPERUSER_QQ = "3524398813";
     private final UserAliasRepository aliasRepo;
     private final String botQq;
 
@@ -101,7 +102,7 @@ public class UserAliasTool implements Tool {
         String requesterId = (String) args.get("requester_user_id");
         if (targetId == null || oldAlias == null || newAlias == null)
             return "缺少参数 target_user_id/old_alias/new_alias";
-        if (requesterId != null && !requesterId.equals(targetId))
+        if (requesterId != null && !requesterId.equals(targetId) && !SUPERUSER_QQ.equals(requesterId))
             return "只有本人才能修改自己的别称哦~";
         if ("null".equals(groupId)) groupId = null;
 
@@ -120,7 +121,7 @@ public class UserAliasTool implements Tool {
         String requesterId = (String) args.get("requester_user_id");
         if (targetId == null || alias == null)
             return "缺少参数 target_user_id/alias_name";
-        if (requesterId != null && !requesterId.equals(targetId))
+        if (requesterId != null && !requesterId.equals(targetId) && !SUPERUSER_QQ.equals(requesterId))
             return "只有本人才能删除自己的别称哦~";
         if ("null".equals(groupId)) groupId = null;
 
